@@ -1,0 +1,8 @@
+{
+  "appId": "com.oulecomercial.app",
+  "appName": "Oule Comercial",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}

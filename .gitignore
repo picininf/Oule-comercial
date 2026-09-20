@@ -1,0 +1,23 @@
+# Segredos - NUNCA versionar nem incluir em zips/exports
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# Sessão autenticada do WhatsApp (Baileys) - equivale a uma credencial de acesso
+backend/auth_info_baileys/
+
+# Comprovantes enviados por usuários (dados financeiros/PII reais)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Dependências e build
+node_modules/
+dist/
+build/
+
+# Logs e artefatos de SO/editor
+*.log
+.DS_Store
+.vscode/
