@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Oule Comercial</string>
+    <string name="title_activity_main">Oule Comercial</string>
+    <string name="package_name">com.oulecomercial.app</string>
+    <string name="custom_url_scheme">com.oulecomercial.app</string>
+</resources>
