@@ -129,3 +129,11 @@ O menu do cliente caiu de **15 para 7 entradas**. Telas parecidas viraram sub-ab
 - Endereços antigos continuam funcionando (`#cartoes` abre Contas & Cartões → Cartões e faturas, `#analises` abre o Início etc.).
 - Ficha do cliente na visão do planejador segue a mesma organização (7 abas em vez de 12).
 - Celular: indicadores em 2 colunas.
+
+---
+
+## Correção (03/10/2026) — contas fixas no Planejamento
+
+**Problema:** aluguel, luz e água cadastrados em *Contas do mês* não mudavam a previsão. O Planejamento usava o **maior** entre a média de gastos recente e o total de contas fixas — como a média (R$ 625) era maior que as contas (R$ 600), elas "sumiam".
+
+**Agora:** a previsão é feita categoria a categoria: para cada uma vale o maior entre a média (ou o plano) e as contas fixas. Conta nova (que não estava no histórico nem no plano) **soma**; conta que já aparecia no histórico (ex.: aluguel pago todo mês) **não conta duas vezes**. O detalhe do mês mostra "Saídas previstas", a origem ("pela média recente + contas fixas") e uma coluna **Conta fixa** por categoria.

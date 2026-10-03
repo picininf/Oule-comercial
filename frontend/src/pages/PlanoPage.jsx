@@ -7,7 +7,7 @@ import { CATEGORIAS_DESPESA, CATEGORIAS_RECEITA, categoriaInfo } from '../lib/ca
 import { formatarMes, formatarMoeda, formatarPct, mesAtual, qs, somarMeses } from '../lib/format';
 
 const ESTADO_ROTULO = { realizado: 'Realizado', em_andamento: 'Em andamento', futuro: 'Previsto' };
-const FONTE_ROTULO = { plano: 'pelo plano', historico: 'pela média recente', sem_dados: 'sem dados', realizado: '' };
+const FONTE_ROTULO = { plano: 'pelo plano', historico: 'pela média recente', contas_fixas: 'pelas contas fixas', sem_dados: 'sem dados', realizado: '' };
 
 /**
  * Plano x Vida Real — ano atual, anos anteriores e ANOS SEGUINTES.
@@ -209,7 +209,7 @@ function DetalheMes({ mes, regime, onEditar, onCopiar }) {
       <div className="linha-entre">
         <h3>
           {formatarMes(mes.mes)} <span className="tag">{ESTADO_ROTULO[mes.estado]}</span>
-          {!real && mes.fontePrevisao !== 'realizado' && <span className="texto-suave texto-pequeno"> · previsão {FONTE_ROTULO[mes.fontePrevisao]}</span>}
+          {!real && mes.fontePrevisao !== 'realizado' && <span className="texto-suave texto-pequeno"> · previsão {FONTE_ROTULO[mes.fontePrevisao]}{mes.comprometidoContasFixas > 0 && mes.fontePrevisao !== 'contas_fixas' ? ' + contas fixas' : ''}</span>}
         </h3>
         <div className="linha nao-exportar">
           <button type="button" className="btn btn-primario btn-pequeno" onClick={onEditar}>✏️ {mes.temPlano ? 'Editar plano' : 'Planejar mês'}</button>
@@ -222,10 +222,11 @@ function DetalheMes({ mes, regime, onEditar, onCopiar }) {
         <div><span>Saiu</span><strong className="negativo">{fmt(mes.saidas)}</strong></div>
         <div><span>Receita planejada</span><strong>{fmt(mes.planejadoReceitas)}</strong></div>
         <div><span>Despesa planejada</span><strong>{fmt(mes.planejadoDespesas)}</strong></div>
+        {!real && <div><span>Saídas previstas</span><strong className="negativo">{fmt(mes.previstoSaidas)}</strong></div>}
         {!real && <div><span>Saldo previsto</span><strong className={mes.saldoPrevisto >= 0 ? 'positivo' : 'negativo'}>{fmt(mes.saldoPrevisto)}</strong></div>}
         {(mes.comprometidoParcelas > 0 || mes.comprometidoContasFixas > 0) && (
           <div title={regime === 'competencia' ? 'No regime de competência as parcelas já foram contadas no mês da compra.' : ''}>
-            <span>Já comprometido</span>
+            <span>Contas fixas e parcelas</span>
             <strong>{fmt(mes.comprometidoParcelas + mes.comprometidoContasFixas)}</strong>
             <span style={{ textTransform: 'none', fontWeight: 500 }}>parcelas {fmt(mes.comprometidoParcelas)} · contas {fmt(mes.comprometidoContasFixas)}</span>
           </div>
@@ -248,6 +249,7 @@ function DetalheMes({ mes, regime, onEditar, onCopiar }) {
                 <th className="num">Planejado</th>
                 <th className="num">Realizado</th>
                 <th className="num">Média recente</th>
+                {!real && <th className="num">Conta fixa</th>}
                 <th>Uso do plano</th>
               </tr>
             </thead>
@@ -261,6 +263,7 @@ function DetalheMes({ mes, regime, onEditar, onCopiar }) {
                     <td className="num">{c.planejado ? fmt(c.planejado) : '—'}</td>
                     <td className={`num ${estourou ? 'negativo' : ''}`}>{c.real ? fmt(c.real) : '—'}</td>
                     <td className="num texto-suave">{c.mediaHistorica ? fmt(c.mediaHistorica) : '—'}</td>
+                    {!real && <td className="num">{c.comprometido ? fmt(c.comprometido) : '—'}</td>}
                     <td style={{ minWidth: 120 }}>
                       {pct === null ? <span className="texto-suave texto-pequeno">sem plano</span> : (
                         <div className="linha" style={{ flexWrap: 'nowrap' }}>

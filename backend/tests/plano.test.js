@@ -45,7 +45,11 @@ const banco = criarSupabaseFalso({
   transacoes,
   plano_mensal: plano,
   plano_premissas: [],
-  pagamentos_recorrentes: [{ id: 'p1', user_id: U, descricao: 'Aluguel', categoria: 'Moradia', valor: 2000, dia_vencimento: 10, ativo: true, inicio_mes: null, fim_mes: null }],
+  pagamentos_recorrentes: [
+    { id: 'p1', user_id: U, descricao: 'Aluguel', categoria: 'Moradia', valor: 2000, dia_vencimento: 10, ativo: true, inicio_mes: null, fim_mes: null },
+    // Conta nova, que ainda não aparece no histórico de gastos.
+    { id: 'p2', user_id: U, descricao: 'Luz', categoria: 'Serviços', valor: 150, dia_vencimento: 15, ativo: true, inicio_mes: null, fim_mes: null },
+  ],
   objetivos: [{ id: 'o1', user_id: U, titulo: 'Viagem', valor_alvo: 10000, valor_atual: 0, prazo: `${somarMeses(mesAtual, 6)}-28`, status: 'em_andamento' }],
   profiles: [{ id: U, renda_mensal: 5000 }],
 });
@@ -76,7 +80,7 @@ test('regime de caixa: parcelas comprometidas nos meses das faturas', async () =
   if (proximo) {
     assert.equal(proximo.comprometidoParcelas, 200);
     // Conta fixa de aluguel também aparece como comprometida.
-    assert.equal(proximo.comprometidoContasFixas, 2000);
+    assert.equal(proximo.comprometidoContasFixas, 2150);
   }
   // Na competência, a compra inteira pesa no mês em que foi feita.
   const comp = await montarPainel(U, { ano: anoAtual, regime: 'competencia' });
@@ -94,11 +98,23 @@ test('ano futuro: usa o plano e aponta plano otimista', async () => {
   assert.equal(jan.estado, 'futuro');
   assert.equal(jan.fontePrevisao, 'plano');
   assert.equal(jan.previstoEntradas, 5500);
-  assert.equal(jan.previstoSaidas, 2800);
-  assert.equal(p.resumo.saldoPrevisto, 2700 * 12);
+  // Plano: Alimentação 800 + Moradia 2000; a conta de luz (150) não estava
+  // no plano, mas é fixa — entra na previsão.
+  assert.equal(jan.previstoSaidas, 2950);
+  assert.equal(p.resumo.saldoPrevisto, 2550 * 12);
 
   const titulos = p.conclusoes.map((c) => c.titulo);
   assert.ok(titulos.some((t) => t.includes('otimista')), `esperava alerta de plano otimista em: ${titulos.join(' | ')}`);
   const otimista = p.conclusoes.find((c) => c.titulo.includes('otimista'));
   assert.match(otimista.texto, /Alimentação/);
+});
+
+test('previsão soma contas fixas novas sem contar duas vezes as que já estão no histórico', async () => {
+  const p = await montarPainel(U, { ano: anoAtual, regime: 'competencia' });
+  const proximo = p.meses.find((m) => m.mes === somarMeses(mesAtual, 1));
+  if (!proximo) return; // dezembro: o próximo mês é de outro ano
+  // Média: Alimentação 1500 + Moradia 2000. Aluguel (2000) já está na
+  // média; a luz (150) é nova e precisa entrar.
+  assert.equal(proximo.previstoSaidas, 3650);
+  assert.equal(proximo.saldoPrevisto, 5000 - 3650);
 });

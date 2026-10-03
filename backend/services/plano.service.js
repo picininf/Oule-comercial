@@ -139,7 +139,7 @@ function novoMes(ano, i) {
     label: NOMES_MES[i],
     real: { entradas: 0, saidas: 0, categorias: {} },
     plano: { receitas: 0, despesas: 0, categorias: {} },
-    comprometido: { parcelas: 0, contasFixas: 0 },
+    comprometido: { parcelas: 0, contasFixas: 0, fixasPorCategoria: {} },
   };
 }
 
@@ -214,9 +214,14 @@ export async function montarPainel(userId, { ano, regime = 'competencia' }) {
   }
   for (const m of meses) {
     if (m.mes < mesAtual) continue;
-    m.comprometido.contasFixas = (contas || [])
-      .filter((c) => vigenteNoMes(c, m.mes))
-      .reduce((s, c) => s + Number(c.valor), 0);
+    for (const c of (contas || []).filter((x) => vigenteNoMes(x, m.mes))) {
+      const valor = Number(c.valor) || 0;
+      const categoria = c.categoria || 'Outros';
+      m.comprometido.contasFixas += valor;
+      m.comprometido.fixasPorCategoria[categoria] = (m.comprometido.fixasPorCategoria[categoria] || 0) + valor;
+      const cat = (m.real.categorias[categoria] ||= { categoria, real: 0, planejado: 0, comprometido: 0 });
+      cat.comprometido += valor;
+    }
   }
 
   // 4) Previsto para meses sem realizado
@@ -246,9 +251,26 @@ export async function montarPainel(userId, { ano, regime = 'competencia' }) {
       fontePrevisao = 'realizado';
     } else {
       previstoEntradas = m.plano.receitas || rendaBase * fatorRenda;
-      // Nunca prevê gastar menos do que já está comprometido.
-      previstoSaidas = Math.max(m.plano.despesas || gastoBase * fatorInflacao, comprometidoTotal);
-      fontePrevisao = temPlano ? 'plano' : historico.mesesConsiderados > 0 ? 'historico' : 'sem_dados';
+      // Gastos previstos categoria a categoria: o plano (ou a média recente
+      // corrigida pela inflação) e, por cima, as contas fixas cadastradas.
+      // Por categoria vale o MAIOR dos dois — assim um aluguel que já
+      // aparece no histórico não conta duas vezes, mas uma conta nova
+      // (ex.: luz cadastrada hoje) entra na previsão em vez de sumir na
+      // média de gastos.
+      const baseCategorias = temPlano
+        ? Object.fromEntries(Object.entries(m.plano.categorias).filter(([c]) => categoriaInfo(c).grupo === 'despesa'))
+        : Object.fromEntries(
+            Object.entries(historico.porCategoria)
+              .filter(([c]) => categoriaInfo(c).grupo === 'despesa')
+              .map(([c, v]) => [c, v * fatorInflacao])
+          );
+      const fixas = m.comprometido.fixasPorCategoria;
+      const previstoCategorias = [...new Set([...Object.keys(baseCategorias), ...Object.keys(fixas)])]
+        .reduce((s, c) => s + Math.max(baseCategorias[c] || 0, fixas[c] || 0), 0);
+      // Sem detalhe por categoria no histórico (registros antigos), cai no total.
+      const base = temPlano ? m.plano.despesas : gastoBase * fatorInflacao;
+      previstoSaidas = Math.max(previstoCategorias, base, comprometidoTotal);
+      fontePrevisao = temPlano ? 'plano' : historico.mesesConsiderados > 0 ? 'historico' : m.comprometido.contasFixas > 0 ? 'contas_fixas' : 'sem_dados';
       if (estado === 'em_andamento') {
         // mês corrente: o que já aconteceu nunca é "desfeito" pela previsão
         previstoEntradas = Math.max(previstoEntradas, m.real.entradas);
