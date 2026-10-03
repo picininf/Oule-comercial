@@ -678,7 +678,11 @@ code { background: var(--superficie-3); padding: 1px 6px; border-radius: 4px; fo
 }
 
 @media (max-width: 480px) {
-  .metricas { grid-template-columns: minmax(0, 1fr); }
+  .metricas { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .metrica { padding: 10px 12px; }
+  .metrica-valor { font-size: 18px; }
+  .metrica-detalhe { font-size: 11px; }
+  .segmentado { flex-wrap: wrap; }
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal { max-height: 94vh; max-height: 94dvh; border-radius: 18px 18px 0 0; }
   .modal-cabecalho, .modal-corpo, .modal-rodape { padding-left: 18px; padding-right: 18px; }

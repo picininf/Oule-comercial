@@ -114,7 +114,7 @@ export default function ObjetivosPage({ userId = null, editavel = true }) {
         {objetivos.some((o) => o.status === 'em_andamento') && (
           <p className="texto-suave">
             Sonhos ativos somam <strong>{fmt(totais.alvo)}</strong>, com <strong>{fmt(totais.guardado)}</strong> já guardados.
-            {totais.porMes > 0 && <> Para cumprir os prazos, é preciso guardar cerca de <strong>{fmt(totais.porMes)}</strong> por mês — veja em “Futuro” se isso cabe no seu ritmo.</>}
+            {totais.porMes > 0 && <> Para cumprir os prazos, é preciso guardar cerca de <strong>{fmt(totais.porMes)}</strong> por mês — veja em Planejamento → Futuro se isso cabe no seu ritmo.</>}
           </p>
         )}
       </Card>

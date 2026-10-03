@@ -80,3 +80,52 @@
 
 Testes: `cd backend && npm test` (17 testes de regras, incluindo o Plano x
 Vida Real com banco simulado).
+
+---
+
+## Atualização de 03/10/2026 — correções e "Minhas Regras"
+
+### ⚠️ Antes de rodar
+
+1. **Banco:** rode `backend/sql/schema_v5_regras.sql` no SQL Editor do Supabase (cria `regras_transacao` e as colunas `regra_id` / `descricao_original` em `transacoes`). Sem ela o app continua funcionando, só a aba de regras avisa que não está ativa.
+2. Reinicie o backend (o bot do WhatsApp pega os comandos novos).
+
+### Correções
+
+| Problema | Causa | Correção |
+|---|---|---|
+| Visão Geral sem **despesas por categoria** | O mês atual (outubro) só tinha um Pix de R$ 10 enviado pelo WhatsApp que a IA marcou como **Transferências** — e transferências não contam como gasto. Setembro, que tinha os dados, não dava para ver. | Setas ← → para navegar entre meses, botão "Ver mês anterior" quando o mês está vazio e aviso quando há lançamentos em Transferências. |
+| `!resumo` no WhatsApp sem dados | Mesmo motivo: só olhava o mês atual e a transferência era ignorada. | Comprovante de Pix para **outra pessoa** não vira mais Transferências (prompt da IA + trava no código). `!resumo` mostra o último mês com movimento quando o atual está vazio, aceita `!resumo anterior` e `!resumo 09/2026`, mostra top 5 categorias e quantas transferências ficaram de fora. |
+| **Plano x Vida Real**: alternar Competência/Caixa não mudava nada | Os dois regimes só diferem em compras no cartão pagas em outro mês; sem cartão cadastrado os números são idênticos. | A tela agora explica isso (e mostra "Atualizando..." ao alternar). O backend devolve `regimesIguais`. |
+| "Aplicação RDB" caía em Outros | — | Reconhecida como Investimentos. |
+
+### Nova aba: 📌 Minhas Regras
+
+O cliente ensina o app a reconhecer Pix e compras que se repetem. Ex.: *"Transferência enviada pelo Pix - Pedro Veiga Rela Tavares - •••.007.268-••…"* → nome **Brownie**, categoria **Alimentação**, tipo **Variável | Não obrigatório**.
+
+- Criar pela aba **Minhas Regras** (com **sugestões** dos lançamentos repetidos em "Outros") ou pelo **📌** ao lado de qualquer lançamento em Transações — o trecho (nome de quem recebeu) já vem sugerido.
+- Prévia ao vivo de quantos lançamentos a regra pega; opção de aplicar também nos que já existem.
+- Vale para tudo que entrar depois: planilha/extrato, Open Finance e comprovante do WhatsApp. Pode valer só para saídas, só entradas ou ambos. Regra mais específica vence.
+- A descrição original do banco fica guardada (`descricao_original`): editar a regra reaplica, excluir pode "voltar os nomes", e reenviar o mesmo extrato continua sem duplicar.
+- Pausar/reativar, editar e excluir. O planejador também vê a aba **Regras** dentro do cliente.
+
+---
+
+## Atualização de 03/10/2026 (2) — app mais simples
+
+O menu do cliente caiu de **15 para 7 entradas**. Telas parecidas viraram sub-abas e nada foi removido:
+
+| Menu novo | O que tem dentro |
+|---|---|
+| 🏠 **Início** | Mês em números (Entrou / Saiu / Sobrou / Quanto guardei), **Meus sonhos** (os 3 mais próximos + pop-up "Ver todos"), **Para onde foi o dinheiro** (Categorias · Tipos · Comparar com perfil parecido — a antiga *Análise de Gastos*), dicas e últimas movimentações. |
+| 💱 **Transações** | Extrato · Regras automáticas |
+| 💳 **Contas & Cartões** | Contas do mês · Cartões e faturas |
+| 🎯 **Sonhos & Metas** | igual |
+| 🗓️ **Planejamento** | Plano do ano · Futuro & aposentadoria · Retrospectiva |
+| 🔌 **Conectar & Importar** | Importar extrato · Conectar banco · WhatsApp |
+| 👤 **Minha conta** | Meu cadastro · Configurações |
+
+- **Competência/caixa sem jargão:** virou "Quando comprei / Quando pago" e **só aparece quando há compra no cartão paga em outro mês** (Plano e Transações). Sem cartão, ninguém precisa pensar nisso.
+- Endereços antigos continuam funcionando (`#cartoes` abre Contas & Cartões → Cartões e faturas, `#analises` abre o Início etc.).
+- Ficha do cliente na visão do planejador segue a mesma organização (7 abas em vez de 12).
+- Celular: indicadores em 2 colunas.

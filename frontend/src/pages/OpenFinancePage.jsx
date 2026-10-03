@@ -90,7 +90,7 @@ export default function OpenFinancePage({ onSincronizado }) {
       <Card titulo="Open Finance" icone="🏦" acoes={<button type="button" className="btn btn-primario" onClick={() => abrirConnect()} disabled={abrindo}>{abrindo ? 'Abrindo...' : '⚡ Conectar instituição'}</button>}>
         <p className="texto-suave">
           Conecte suas contas e cartões pelo protocolo regulamentado pelo Banco Central. Depois da conexão, as novas transações chegam sozinhas —
-          e os cartões aparecem em <strong>Cartões & Faturas</strong> com as compras já na fatura certa.
+          e os cartões aparecem em <strong>Contas & Cartões</strong> com as compras já na fatura certa.
         </p>
         <p className="texto-suave texto-pequeno" style={{ marginTop: 8 }}>🔒 O app nunca vê sua senha do banco: o login acontece no ambiente seguro da Pluggy, e o acesso é só de leitura.</p>
       </Card>
@@ -98,7 +98,7 @@ export default function OpenFinancePage({ onSincronizado }) {
       <Card titulo="Conexões" icone="🔗" semPadding>
         <Alerta>{erro}</Alerta>
         {carregando && !itens ? <Carregando /> : !itens || itens.length === 0 ? (
-          <Vazio icone="🏦" titulo="Nenhum banco conectado" texto="Prefere não conectar? Use “Importar Extrato” para enviar o arquivo do banco todo mês." />
+          <Vazio icone="🏦" titulo="Nenhum banco conectado" texto="Prefere não conectar? Use a aba “Importar extrato” para enviar o arquivo do banco todo mês." />
         ) : (
           <ul className="lista-contas">
             {itens.map((item) => {

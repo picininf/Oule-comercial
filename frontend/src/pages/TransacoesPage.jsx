@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import TransactionTable from '../components/TransactionTable';
 import MenuExportar from '../components/MenuExportar';
 import { NovaTransacaoModal, EditarTransacaoModal } from '../components/TransacaoModais';
+import RegraModal from '../components/RegraModal';
 import { Card, Metrica, Alerta, useValores, useToast, useConfirmacao } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { api } from '../lib/api';
@@ -46,6 +47,7 @@ export default function TransacoesPage({ userId = null }) {
   const [origem, setOrigem] = useState('');
   const [novoAberto, setNovoAberto] = useState(false);
   const [editando, setEditando] = useState(null);
+  const [regraDe, setRegraDe] = useState(null);
 
   const { de, ate } = intervalo(periodo);
   const { dados, carregando, erro, recarregar } = useApi(`/transacoes${qs({ userId, de, ate, regime })}`);
@@ -61,6 +63,9 @@ export default function TransacoesPage({ userId = null }) {
   }, [dados, busca, categoria, tipoGasto, origem, regime]);
 
   const totais = resumir(filtradas);
+  // A escolha "data da compra x data do pagamento" só muda algo quando há
+  // compra no cartão paga em outro dia — sem isso, nem aparece.
+  const temCartao = regime === 'caixa' || (dados || []).some((t) => t.data_caixa && t.data_caixa !== (t.data_competencia || t.data_transacao));
 
   const excluir = async (t) => {
     const parcelada = t.compra_id && t.parcelas_total > 1;
@@ -83,7 +88,7 @@ export default function TransacoesPage({ userId = null }) {
   };
 
   const dadosExportacao = () => ({
-    subtitulo: `${PERIODOS.find((p) => p.id === periodo).nome} · regime de ${regime === 'caixa' ? 'caixa' : 'competência'}`,
+    subtitulo: `${PERIODOS.find((p) => p.id === periodo).nome}${temCartao ? ` · por ${regime === 'caixa' ? 'data do pagamento' : 'data da compra'}` : ''}`,
     resumo: [
       { rotulo: 'Entradas', valor: formatarMoeda(totais.entradas) },
       { rotulo: 'Saídas', valor: formatarMoeda(totais.saidas) },
@@ -142,15 +147,15 @@ export default function TransacoesPage({ userId = null }) {
               {Object.entries(ORIGENS).map(([id, o]) => <option key={id} value={id}>{o.nome}</option>)}
             </select>
           </div>
-          <div className="linha-entre">
-            <div className="segmentado" role="group" aria-label="Regime das datas">
+          {temCartao && <div className="linha-entre">
+            <div className="segmentado" role="group" aria-label="Organizar por">
               <button type="button" className={regime === 'competencia' ? 'ativo' : ''} onClick={() => setRegime('competencia')}>Data da compra</button>
               <button type="button" className={regime === 'caixa' ? 'ativo' : ''} onClick={() => setRegime('caixa')}>Data do pagamento</button>
             </div>
             <span className="texto-suave texto-pequeno">
-              {regime === 'caixa' ? 'Compras no cartão aparecem no mês em que a fatura vence.' : 'Compras no cartão aparecem no mês em que foram feitas.'}
+              {regime === 'caixa' ? 'Compras no cartão aparecem no dia em que a fatura vence.' : 'Compras no cartão aparecem no dia em que foram feitas.'}
             </span>
-          </div>
+          </div>}
           <Alerta>{erro}</Alerta>
         </div>
         <TransactionTable
@@ -158,10 +163,12 @@ export default function TransacoesPage({ userId = null }) {
           loading={carregando && !dados}
           onEditar={setEditando}
           onExcluir={excluir}
+          onCriarRegra={setRegraDe}
         />
       </Card>
 
       {novoAberto && <NovaTransacaoModal userId={userId} onFechar={() => setNovoAberto(false)} onSalvo={recarregar} />}
+      {regraDe && <RegraModal transacao={regraDe} userId={userId} onFechar={() => setRegraDe(null)} onSalvo={recarregar} />}
       {editando && <EditarTransacaoModal transacao={editando} onFechar={() => setEditando(null)} onSalvo={recarregar} />}
       {periodo === 'mes' && <p className="texto-suave texto-pequeno centro">Mostrando {formatarMes(mesAtual())}.</p>}
     </div>

@@ -34,6 +34,9 @@ export default function PlanoPage({ userId = null }) {
     setMesSelecionado(ano === anoAtual ? mesAtual() : `${ano}-01`);
   }, [ano, anoAtual]);
 
+  // "Quando comprei x quando pago" só aparece se houver compra no cartão
+  // paga em outro mês; sem isso os dois dão o mesmo número.
+  const mostrarRegime = regime === 'caixa' || (painel && !painel.regimesIguais);
   const mes = painel?.meses.find((m) => m.mes === mesSelecionado) || painel?.meses[0];
 
   // No celular a linha do tempo rola na horizontal: mantém o mês
@@ -50,7 +53,7 @@ export default function PlanoPage({ userId = null }) {
   );
 
   const dadosExportacao = () => ({
-    subtitulo: `${ano} · regime de ${regime === 'caixa' ? 'caixa' : 'competência'}`,
+    subtitulo: `${ano}${mostrarRegime ? ` · cartão contado ${regime === 'caixa' ? 'quando pago' : 'quando comprei'}` : ''}`,
     resumo: painel
       ? [
           { rotulo: 'Entradas previstas', valor: formatarMoeda(painel.resumo.entradasPrevistas) },
@@ -83,10 +86,12 @@ export default function PlanoPage({ userId = null }) {
             ))}
           </select>
           <button type="button" className="btn btn-secundario btn-pequeno" onClick={() => setAno((a) => Math.min(a + 1, anoAtual + 10))} aria-label="Próximo ano">→</button>
-          <div className="segmentado" role="group" aria-label="Regime">
-            <button type="button" className={regime === 'competencia' ? 'ativo' : ''} onClick={() => setRegime('competencia')} title="Gasto conta no mês da compra">Competência</button>
-            <button type="button" className={regime === 'caixa' ? 'ativo' : ''} onClick={() => setRegime('caixa')} title="Gasto conta no mês em que o dinheiro sai (vencimento da fatura)">Caixa</button>
-          </div>
+          {mostrarRegime && (
+            <div className="segmentado" role="group" aria-label="Compras no cartão contam">
+              <button type="button" className={regime === 'competencia' ? 'ativo' : ''} onClick={() => setRegime('competencia')} title="Compra no cartão conta no mês em que foi feita">Quando comprei</button>
+              <button type="button" className={regime === 'caixa' ? 'ativo' : ''} onClick={() => setRegime('caixa')} title="Compra no cartão conta no mês em que a fatura vence">Quando pago</button>
+            </div>
+          )}
         </div>
         <div className="linha nao-exportar">
           <button type="button" className="btn btn-secundario" onClick={() => setPremissasAbertas(true)}>⚙️ Premissas de {ano}</button>
@@ -94,6 +99,15 @@ export default function PlanoPage({ userId = null }) {
         </div>
       </div>
 
+      {mostrarRegime && (
+        <p className="texto-suave texto-pequeno" style={{ margin: 0 }} aria-live="polite">
+          {carregando
+            ? '⏳ Atualizando...'
+            : regime === 'caixa'
+              ? '💳 Compras no cartão contam no mês em que a fatura vence (quando o dinheiro sai da conta).'
+              : '🛒 Compras no cartão contam no mês em que foram feitas.'}
+        </p>
+      )}
       <Alerta>{erro}</Alerta>
       {carregando && !painel && <Carregando texto="Montando a linha do tempo..." />}
 

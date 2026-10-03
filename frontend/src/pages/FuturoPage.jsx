@@ -189,7 +189,7 @@ function Aposentadoria({ dados, onEditar }) {
           acao={<button type="button" className="btn btn-primario" onClick={onEditar}>Configurar meu plano</button>}
         />
       ) : r?.precisaDataNascimento ? (
-        <Alerta tipo="atencao">Informe a data de nascimento em “Meu Cadastro” para calcular o tempo até a aposentadoria. Patrimônio necessário: <strong>{fmt(r.patrimonioNecessario)}</strong>.</Alerta>
+        <Alerta tipo="atencao">Informe a data de nascimento em “Minha conta” para calcular o tempo até a aposentadoria. Patrimônio necessário: <strong>{fmt(r.patrimonioNecessario)}</strong>.</Alerta>
       ) : (
         <div className="pilha">
           <div className="metricas">

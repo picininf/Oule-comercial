@@ -371,7 +371,7 @@ function LembretesModal({ userId, onFechar }) {
             <input type="checkbox" checked={whatsapp} onChange={(e) => setWhatsapp(e.target.checked)} />
             <span>Receber os lembretes no WhatsApp vinculado (antes do vencimento, no dia e no dia seguinte, se não estiver marcada como paga)</span>
           </label>
-          <p className="texto-suave texto-pequeno">Os avisos também aparecem na Visão Geral do app. Para receber no WhatsApp, vincule seu número na aba WhatsApp Bot.</p>
+          <p className="texto-suave texto-pequeno">Os avisos também aparecem no Início do app. Para receber no WhatsApp, vincule seu número em Conectar & Importar → WhatsApp.</p>
         </>
       )}
     </Modal>

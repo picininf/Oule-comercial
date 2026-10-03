@@ -6,73 +6,66 @@ import { api } from './lib/api';
 import Sidebar from './components/Sidebar';
 import { ValoresProvider, ToastProvider, useValores, Carregando } from './components/ui';
 import AuthPage from './pages/AuthPage';
+import {
+  TransacoesAgrupada, ContasAgrupada, PlanejamentoAgrupada, ConectarAgrupada, ContaAgrupada,
+} from './pages/Agrupadas';
 
 // Páginas carregadas sob demanda: o app abre mais rápido no celular.
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const TransacoesPage = lazy(() => import('./pages/TransacoesPage'));
-const PlanoPage = lazy(() => import('./pages/PlanoPage'));
-const FuturoPage = lazy(() => import('./pages/FuturoPage'));
 const ObjetivosPage = lazy(() => import('./pages/ObjetivosPage'));
-const PagamentosPage = lazy(() => import('./pages/PagamentosPage'));
-const CartoesPage = lazy(() => import('./pages/CartoesPage'));
-const AnalisesPage = lazy(() => import('./pages/AnalisesPage'));
-const RetrospectivaPage = lazy(() => import('./pages/RetrospectivaPage'));
-const OpenFinancePage = lazy(() => import('./pages/OpenFinancePage'));
-const ImportarExtratoPage = lazy(() => import('./pages/ImportarExtratoPage'));
-const WhatsappBotPage = lazy(() => import('./pages/WhatsappBotPage'));
 const PerfilPage = lazy(() => import('./pages/PerfilPage'));
 const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
+const WhatsappBotPage = lazy(() => import('./pages/WhatsappBotPage'));
 const AdminOverviewPage = lazy(() => import('./pages/admin/AdminOverviewPage'));
 const AdminUsuariosPage = lazy(() => import('./pages/admin/AdminUsuariosPage'));
 const AdminAnalisesPage = lazy(() => import('./pages/admin/AdminAnalisesPage'));
 const AdminPlanejadoresPage = lazy(() => import('./pages/admin/AdminPlanejadoresPage'));
 
 /**
- * Páginas por papel. `dinheiro: true` = a página mostra valores, então
- * ganha o botão "Ocultar valores" (antes ele aparecia até em telas sem
- * nenhum valor, como WhatsApp e Configurações).
+ * Menu do cliente: 7 entradas. Telas parecidas viraram sub-abas (ver
+ * pages/Agrupadas.jsx) e a antiga "Análise de Gastos" foi para o Início.
+ * `dinheiro: true` = a página mostra valores, então ganha o botão
+ * "Ocultar valores".
  */
 const PAGINAS_CLIENTE = [
   {
-    grupo: 'Início',
+    grupo: 'Meu dinheiro',
     itens: [
-      { id: 'inicio', nome: 'Visão Geral', icone: '📊', dinheiro: true, subtitulo: 'Como está o seu mês, com dicas para o seu dinheiro render mais.' },
-      { id: 'transacoes', nome: 'Transações', icone: '💱', dinheiro: true, subtitulo: 'Extrato completo: filtre, recategorize e lance gastos manuais.' },
+      { id: 'inicio', nome: 'Início', icone: '🏠', dinheiro: true, subtitulo: 'Seu mês, seus sonhos e para onde vai o seu dinheiro.' },
+      { id: 'transacoes', nome: 'Transações', icone: '💱', dinheiro: true, subtitulo: 'Tudo o que entrou e saiu. Ajuste categorias e crie regras para os lançamentos que se repetem.' },
+      { id: 'contas', nome: 'Contas & Cartões', icone: '💳', dinheiro: true, subtitulo: 'Contas fixas, vencimentos e faturas dos cartões.' },
     ],
   },
   {
-    grupo: 'Planejamento',
+    grupo: 'Meu futuro',
     itens: [
-      { id: 'plano', nome: 'Plano x Vida Real', icone: '🗓️', dinheiro: true, subtitulo: 'Planeje o ano (e os próximos) e compare com o que aconteceu de verdade.' },
-      { id: 'futuro', nome: 'Futuro & Aposentadoria', icone: '🔭', dinheiro: true, subtitulo: 'Para onde o seu ritmo atual leva — sonhos, patrimônio e liberdade financeira.' },
       { id: 'sonhos', nome: 'Sonhos & Metas', icone: '🎯', dinheiro: true, subtitulo: 'Cadastre seus sonhos e acompanhe quanto falta para cada um.' },
-      { id: 'pagamentos', nome: 'Pagamentos do mês', icone: '🧾', dinheiro: true, subtitulo: 'Contas fixas, vencimentos e lembretes.' },
-      { id: 'cartoes', nome: 'Cartões & Faturas', icone: '💳', dinheiro: true, subtitulo: 'Cada compra na fatura certa: data da compra x data do pagamento.' },
+      { id: 'plano', nome: 'Planejamento', icone: '🗓️', dinheiro: true, subtitulo: 'Planeje o ano, veja para onde o seu ritmo leva e reveja o ano que passou.' },
     ],
   },
   {
-    grupo: 'Análises',
+    grupo: 'Ajustes',
     itens: [
-      { id: 'analises', nome: 'Análise de Gastos', icone: '📈', dinheiro: true, subtitulo: 'Seus gastos por categoria e tipo, comparados a pessoas com perfil parecido.' },
-      { id: 'retrospectiva', nome: 'Retrospectiva do Ano', icone: '🎉', dinheiro: true, subtitulo: 'O seu ano em números.' },
-    ],
-  },
-  {
-    grupo: 'Conexões',
-    itens: [
-      { id: 'openfinance', nome: 'Open Finance', icone: '🏦', subtitulo: 'Conecte bancos e cartões para importar tudo automaticamente.' },
-      { id: 'importar', nome: 'Importar Extrato', icone: '📄', subtitulo: 'Envie o extrato ou a fatura em CSV, Excel, OFX, PDF ou foto.' },
-      { id: 'whatsapp', nome: 'WhatsApp Bot', icone: '📲', subtitulo: 'Comprovantes, resumo do mês e lembretes pelo WhatsApp.' },
-    ],
-  },
-  {
-    grupo: 'Conta',
-    itens: [
-      { id: 'perfil', nome: 'Meu Cadastro', icone: '👤', subtitulo: 'Seus dados, TAGs de perfil e código de cliente.' },
-      { id: 'config', nome: 'Configurações', icone: '⚙️', subtitulo: 'Tema, exportação de dados e conexão.' },
+      { id: 'conectar', nome: 'Conectar & Importar', icone: '🔌', subtitulo: 'Traga suas transações: extrato, banco conectado ou comprovante no WhatsApp.' },
+      { id: 'conta', nome: 'Minha conta', icone: '👤', subtitulo: 'Seus dados, tema e exportação.' },
     ],
   },
 ];
+
+// Endereços antigos (favoritos, links do WhatsApp) -> novo lugar.
+const ROTAS_ANTIGAS = {
+  analises: 'inicio',
+  regras: 'transacoes/regras',
+  pagamentos: 'contas/pagamentos',
+  cartoes: 'contas/cartoes',
+  futuro: 'plano/futuro',
+  retrospectiva: 'plano/retrospectiva',
+  importar: 'conectar/importar',
+  openfinance: 'conectar/openfinance',
+  whatsapp: 'conectar/whatsapp',
+  perfil: 'conta/perfil',
+  config: 'conta/config',
+};
 
 function paginasStaff(isAdmin) {
   return [
@@ -137,26 +130,37 @@ function useTema() {
 // ---------------------------------------------------------------------
 // Aba atual guardada no endereço (#plano): F5 e "voltar" funcionam.
 // ---------------------------------------------------------------------
-function useAbaNaUrl(padrao, validas) {
-  const ler = useCallback(() => {
-    const hash = window.location.hash.replace('#', '');
-    return validas.includes(hash) ? hash : padrao;
-  }, [padrao, validas]);
-  const [aba, setAbaState] = useState(ler);
+const SEM_ROTAS_ANTIGAS = {};
+
+/**
+ * Aba (e sub-aba) guardadas no endereço: #contas/cartoes. Devolve
+ * [aba, navegar, sub]; `navegar` aceita também os endereços antigos.
+ */
+function useAbaNaUrl(padrao, validas, antigas = SEM_ROTAS_ANTIGAS) {
+  const resolver = useCallback((rota) => {
+    let r = String(rota || '').replace(/^#/, '');
+    if (antigas[r]) r = antigas[r];
+    const [principal, sub] = r.split('/');
+    if (!validas.includes(principal)) return padrao;
+    return sub ? `${principal}/${sub}` : principal;
+  }, [padrao, validas, antigas]);
+  const [rota, setRota] = useState(() => resolver(window.location.hash));
 
   useEffect(() => {
-    setAbaState(ler());
-    const onHash = () => setAbaState(ler());
+    setRota(resolver(window.location.hash));
+    const onHash = () => setRota(resolver(window.location.hash));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, [ler]);
+  }, [resolver]);
 
-  const setAba = useCallback((nova) => {
-    if (window.location.hash !== `#${nova}`) window.location.hash = nova;
-    setAbaState(nova);
+  const navegar = useCallback((nova) => {
+    const r = resolver(nova);
+    if (window.location.hash !== `#${r}`) window.location.hash = r;
+    setRota(r);
     window.scrollTo({ top: 0 });
-  }, []);
-  return [aba, setAba];
+  }, [resolver]);
+  const [aba, sub] = rota.split('/');
+  return [aba, navegar, sub];
 }
 
 function BotaoOcultarValores() {
@@ -212,24 +216,20 @@ function Layout({ grupos, abaAtiva, setAbaAtiva, user, role, onLogout, children 
 
 function AreaCliente({ user, role, logout, tema, setTema, recarregarPerfil }) {
   const ids = useMemo(() => PAGINAS_CLIENTE.flatMap((g) => g.itens.map((i) => i.id)), []);
-  const [aba, setAba] = useAbaNaUrl('inicio', ids);
+  const [aba, navegar, sub] = useAbaNaUrl('inicio', ids, ROTAS_ANTIGAS);
+  const trocarSub = (nova) => navegar(`${aba}/${nova}`);
 
   return (
-    <Layout grupos={PAGINAS_CLIENTE} abaAtiva={aba} setAbaAtiva={setAba} user={user} role={role} onLogout={logout}>
-      {aba === 'inicio' && <DashboardPage onNavegar={setAba} />}
-      {aba === 'transacoes' && <TransacoesPage />}
-      {aba === 'plano' && <PlanoPage />}
-      {aba === 'futuro' && <FuturoPage />}
+    <Layout grupos={PAGINAS_CLIENTE} abaAtiva={aba} setAbaAtiva={navegar} user={user} role={role} onLogout={logout}>
+      {aba === 'inicio' && <DashboardPage onNavegar={navegar} />}
+      {aba === 'transacoes' && <TransacoesAgrupada sub={sub} onSub={trocarSub} />}
+      {aba === 'contas' && <ContasAgrupada sub={sub} onSub={trocarSub} />}
       {aba === 'sonhos' && <ObjetivosPage />}
-      {aba === 'pagamentos' && <PagamentosPage />}
-      {aba === 'cartoes' && <CartoesPage />}
-      {aba === 'analises' && <AnalisesPage onNavegar={setAba} />}
-      {aba === 'retrospectiva' && <RetrospectivaPage />}
-      {aba === 'openfinance' && <OpenFinancePage />}
-      {aba === 'importar' && <ImportarExtratoPage />}
-      {aba === 'whatsapp' && <WhatsappBotPage isAdmin={false} />}
-      {aba === 'perfil' && <PerfilPage onAtualizado={recarregarPerfil} />}
-      {aba === 'config' && <ConfiguracoesPage tema={tema} setTema={setTema} />}
+      {aba === 'plano' && <PlanejamentoAgrupada sub={sub} onSub={trocarSub} />}
+      {aba === 'conectar' && <ConectarAgrupada sub={sub} onSub={trocarSub} />}
+      {aba === 'conta' && (
+        <ContaAgrupada sub={sub} onSub={trocarSub} tema={tema} setTema={setTema} onPerfilAtualizado={recarregarPerfil} />
+      )}
     </Layout>
   );
 }

@@ -10,7 +10,7 @@ const POR_PAGINA = 50;
  * Tabela de transações. Mostra a data da compra (competência) e, quando
  * diferente, a data em que ela é paga (vencimento da fatura do cartão).
  */
-export default function TransactionTable({ transacoes, loading, onEditar, onExcluir, vazioTexto }) {
+export default function TransactionTable({ transacoes, loading, onEditar, onExcluir, onCriarRegra, vazioTexto }) {
   const { fmt } = useValores();
   const [limite, setLimite] = useState(POR_PAGINA);
 
@@ -20,7 +20,7 @@ export default function TransactionTable({ transacoes, loading, onEditar, onExcl
   }
 
   const visiveis = transacoes.slice(0, limite);
-  const editavel = Boolean(onEditar || onExcluir);
+  const editavel = Boolean(onEditar || onExcluir || onCriarRegra);
 
   return (
     <>
@@ -54,6 +54,7 @@ export default function TransactionTable({ transacoes, loading, onEditar, onExcl
                   <td>
                     <strong>{t.descricao || t.estabelecimento || 'Não informado'}</strong>
                     {t.parcelas_total > 1 && <span className="tag" style={{ marginLeft: 6 }}>{t.parcela_atual}/{t.parcelas_total}</span>}
+                    {t.regra_id && <span className="tag" style={{ marginLeft: 6 }} title={t.descricao_original ? `Classificado pela sua regra. No banco: ${t.descricao_original}` : "Classificado pela sua regra"}>📌</span>}
                     {t.observacao && <div className="texto-suave texto-pequeno">{t.observacao}</div>}
                   </td>
                   <td><span className="tag-categoria">{cat.icone} {t.categoria || 'Outros'}</span></td>
@@ -64,6 +65,7 @@ export default function TransactionTable({ transacoes, loading, onEditar, onExcl
                   </td>
                   {editavel && (
                     <td className="acoes">
+                      {onCriarRegra && <button type="button" className="btn btn-fantasma btn-icone" title="Memorizar: classificar sempre assim" aria-label={`Criar regra para ${t.descricao}`} onClick={() => onCriarRegra(t)}>📌</button>}
                       {onEditar && <button type="button" className="btn btn-fantasma btn-icone" title="Editar" aria-label={`Editar ${t.descricao}`} onClick={() => onEditar(t)}>✏️</button>}
                       {onExcluir && !t.open_finance_id && <button type="button" className="btn btn-fantasma btn-icone" title="Excluir" aria-label={`Excluir ${t.descricao}`} onClick={() => onExcluir(t)}>🗑️</button>}
                     </td>

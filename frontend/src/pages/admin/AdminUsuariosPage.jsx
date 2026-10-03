@@ -3,29 +3,23 @@ import { Card, Abas, Vazio, useValores } from '../../components/ui';
 import { formatarData } from '../../lib/format';
 import DashboardPage from '../DashboardPage';
 import PerfilPage from '../PerfilPage';
-import PlanoPage from '../PlanoPage';
-import FuturoPage from '../FuturoPage';
 import ObjetivosPage from '../ObjetivosPage';
-import PagamentosPage from '../PagamentosPage';
-import CartoesPage from '../CartoesPage';
-import TransacoesPage from '../TransacoesPage';
 import ImportarExtratoPage from '../ImportarExtratoPage';
-import AnalisesPage from '../AnalisesPage';
-import RetrospectivaPage from '../RetrospectivaPage';
+import { TransacoesAgrupada, ContasAgrupada, PlanejamentoAgrupada } from '../Agrupadas';
 
+// Mesma organização que o cliente vê (sub-abas dentro de cada uma).
 const ABAS_CLIENTE = [
-  { id: 'resumo', nome: 'Resumo', icone: '📊' },
-  { id: 'cadastro', nome: 'Cadastro', icone: '👤' },
-  { id: 'plano', nome: 'Plano x Vida Real', icone: '🗓️' },
-  { id: 'futuro', nome: 'Futuro', icone: '🔭' },
-  { id: 'sonhos', nome: 'Sonhos', icone: '🎯' },
-  { id: 'pagamentos', nome: 'Pagamentos', icone: '🧾' },
-  { id: 'cartoes', nome: 'Cartões', icone: '💳' },
+  { id: 'resumo', nome: 'Início', icone: '🏠' },
   { id: 'transacoes', nome: 'Transações', icone: '💱' },
+  { id: 'contas', nome: 'Contas & Cartões', icone: '💳' },
+  { id: 'sonhos', nome: 'Sonhos', icone: '🎯' },
+  { id: 'plano', nome: 'Planejamento', icone: '🗓️' },
   { id: 'importar', nome: 'Importar extrato', icone: '📄' },
-  { id: 'analises', nome: 'Análises', icone: '📈' },
-  { id: 'retrospectiva', nome: 'Retrospectiva', icone: '🎉' },
+  { id: 'cadastro', nome: 'Cadastro', icone: '👤' },
 ];
+
+// Links do Início ("Ver pagamentos", "Completar cadastro"...) -> aba da ficha.
+const DESTINO = { pagamentos: 'contas', cartoes: 'contas', perfil: 'cadastro', conta: 'cadastro', regras: 'transacoes', futuro: 'plano' };
 
 /**
  * Clientes da equipe: lista com busca (nome, e-mail ou código) e, ao
@@ -62,17 +56,15 @@ export default function AdminUsuariosPage({ usuarios, usuarioSelecionadoId, onSe
           )}
         </div>
         <Abas abas={ABAS_CLIENTE} ativa={aba} onTrocar={setAba} />
-        {aba === 'resumo' && <DashboardPage userId={usuarioSelecionadoId} onNavegar={setAba} />}
-        {aba === 'cadastro' && <PerfilPage userId={usuarioSelecionadoId} ehStaff onAtualizado={onAtualizarLista} />}
-        {aba === 'plano' && <PlanoPage userId={usuarioSelecionadoId} />}
-        {aba === 'futuro' && <FuturoPage userId={usuarioSelecionadoId} />}
+        {aba === 'resumo' && (
+          <DashboardPage userId={usuarioSelecionadoId} onNavegar={(d) => setAba(DESTINO[d.split('/')[0]] || d.split('/')[0])} />
+        )}
+        {aba === 'transacoes' && <TransacoesAgrupada userId={usuarioSelecionadoId} />}
+        {aba === 'contas' && <ContasAgrupada userId={usuarioSelecionadoId} />}
         {aba === 'sonhos' && <ObjetivosPage userId={usuarioSelecionadoId} />}
-        {aba === 'pagamentos' && <PagamentosPage userId={usuarioSelecionadoId} />}
-        {aba === 'cartoes' && <CartoesPage userId={usuarioSelecionadoId} />}
-        {aba === 'transacoes' && <TransacoesPage userId={usuarioSelecionadoId} />}
+        {aba === 'plano' && <PlanejamentoAgrupada userId={usuarioSelecionadoId} />}
         {aba === 'importar' && <ImportarExtratoPage userId={usuarioSelecionadoId} />}
-        {aba === 'analises' && <AnalisesPage userId={usuarioSelecionadoId} onNavegar={setAba} />}
-        {aba === 'retrospectiva' && <RetrospectivaPage userId={usuarioSelecionadoId} />}
+        {aba === 'cadastro' && <PerfilPage userId={usuarioSelecionadoId} ehStaff onAtualizado={onAtualizarLista} />}
       </div>
     );
   }

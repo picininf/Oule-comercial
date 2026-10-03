@@ -50,8 +50,8 @@ export default function CartoesPage({ userId = null }) {
       {modalConfirmacao}
       <Card titulo="Como as datas funcionam" icone="💡">
         <div className="explicacao">
-          <div><strong>📅 Data da compra (competência)</strong>O gasto pertence ao mês em que você comprou. É o que mostra o seu comportamento de consumo.</div>
-          <div><strong>💸 Data do pagamento (caixa)</strong>O dinheiro só sai no vencimento da fatura. É o que mostra se o mês vai fechar no azul.</div>
+          <div><strong>📅 Quando comprei</strong>O gasto conta no mês da compra — mostra o quanto você está consumindo.</div>
+          <div><strong>💸 Quando pago</strong>O dinheiro só sai da conta no vencimento da fatura — mostra se o mês fecha no azul.</div>
           <div><strong>🛒 Melhor dia de compra</strong>Compras feitas no dia do fechamento ou depois só são cobradas na fatura do mês seguinte — ganha quase 40 dias.</div>
           <div><strong>➗ Parcelas</strong>Cada parcela vai para a fatura certa automaticamente e aparece como “já comprometido” no Plano.</div>
         </div>
@@ -139,7 +139,7 @@ function Faturas({ cartao, onEditar, onExcluir, fmt }) {
     >
       <Alerta>{erro}</Alerta>
       {carregando && !dados ? <Carregando /> : !dados || dados.faturas.length === 0 ? (
-        <Vazio icone="🧾" titulo="Nenhuma compra neste cartão" texto="Lance compras em Transações (forma de pagamento: cartão de crédito) ou importe a fatura em Importar Extrato escolhendo este cartão." />
+        <Vazio icone="🧾" titulo="Nenhuma compra neste cartão" texto="Lance compras em Transações (forma de pagamento: cartão de crédito) ou importe a fatura em Conectar & Importar escolhendo este cartão." />
       ) : (
         <div className="pilha">
           <div className="metricas">

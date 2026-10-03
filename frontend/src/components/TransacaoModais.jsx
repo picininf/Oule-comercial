@@ -66,7 +66,7 @@ export function NovaTransacaoModal({ userId = null, onFechar, onSalvo }) {
     e.preventDefault();
     setErro('');
     if (noCartao && !form.cartaoId) {
-      setErro('Escolha o cartão (ou cadastre um em Cartões & Faturas).');
+      setErro('Escolha o cartão (ou cadastre um em Contas & Cartões → Cartões e faturas).');
       return;
     }
     setSalvando(true);
@@ -168,14 +168,14 @@ export function NovaTransacaoModal({ userId = null, onFechar, onSalvo }) {
 
         {noCartao && cartao && parcelas.length > 0 && (
           <div className="alerta alerta-info">
-            <strong>Quando você paga:</strong> a compra é de {formatarData(form.data)} (competência), mas{' '}
+            <strong>Quando você paga:</strong> a compra é de {formatarData(form.data)}, mas{' '}
             {parcelas.length === 1
               ? <>sai da conta só em <strong>{formatarData(parcelas[0].vencimento)}</strong>, no vencimento da fatura do {cartao.nome}.</>
               : <>as parcelas vencem em {parcelas.map((p) => `${formatarData(p.vencimento)} (${formatarMoeda(p.valor)})`).join(', ')}.</>}
           </div>
         )}
         {noCartao && (cartoes || []).length === 0 && (
-          <Alerta tipo="atencao">Nenhum cartão cadastrado. Cadastre em <strong>Cartões & Faturas</strong> com o dia de fechamento e vencimento.</Alerta>
+          <Alerta tipo="atencao">Nenhum cartão cadastrado. Cadastre em <strong>Contas & Cartões → Cartões e faturas</strong> com o dia de fechamento e vencimento.</Alerta>
         )}
       </form>
     </Modal>
