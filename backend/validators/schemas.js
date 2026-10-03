@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { validar } from './validate.js';
+import { normalizarCategoria } from '../utils/categorias.js';
+import { hojeBrasil } from '../utils/financeUtils.js';
 
 /**
  * Schema de validação do JSON que a IA (Gemini) devolve ao ler um
@@ -14,10 +17,11 @@ export const comprovanteSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional()
-    .default(() => new Date().toISOString().split('T')[0]),
-  categoria: z.enum(['Salário', 'Alimentação', 'Transporte', 'Serviços', 'Lazer', 'Outros']).default('Outros'),
-  metodo_pagamento: z.enum(['Pix', 'Cartão', 'Boleto', 'Dinheiro']).default('Pix'),
-});
+    .default(() => hojeBrasil()),
+  // Qualquer texto que a IA devolver é convertido para uma Categoria Oule.
+  categoria: z.string().trim().max(60).optional().default('Outros'),
+  metodo_pagamento: z.enum(['Pix', 'Cartão', 'Boleto', 'Dinheiro']).catch('Pix').default('Pix'),
+}).transform((c) => ({ ...c, categoria: normalizarCategoria(c.categoria, c.estabelecimento) }));
 
 // Params de rota com itemId da Pluggy (uuid)
 export const itemIdParamSchema = z.object({
@@ -36,24 +40,5 @@ export const pluggyWebhookSchema = z.object({
   error: z.any().optional(),
 }).passthrough();
 
-export function validateBody(schema) {
-  return (req, res, next) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Dados inválidos.', detalhes: result.error.flatten() });
-    }
-    req.body = result.data;
-    next();
-  };
-}
-
-export function validateParams(schema) {
-  return (req, res, next) => {
-    const result = schema.safeParse(req.params);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Parâmetros inválidos.' });
-    }
-    req.params = result.data;
-    next();
-  };
-}
+export const validateBody = (schema) => validar(schema, 'body');
+export const validateParams = (schema) => validar(schema, 'params');

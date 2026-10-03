@@ -44,27 +44,37 @@ export function useAuth() {
 
   useEffect(() => {
     let ativo = true;
+    let usuarioAtual = null;
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user && ativo) {
-        const perfil = await carregarPerfil(session.user);
+    const aplicarSessao = async (session) => {
+      if (!session?.user) {
+        usuarioAtual = null;
         if (ativo) {
-          setUser(perfil);
-          setRole(perfil.role);
+          setUser(null);
+          setRole('cliente');
+          setCarregando(false);
         }
+        return;
       }
-      if (ativo) setCarregando(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const perfil = await carregarPerfil(session.user);
+      const perfil = await carregarPerfil(session.user);
+      usuarioAtual = session.user.id;
+      if (ativo) {
         setUser(perfil);
         setRole(perfil.role);
-      } else {
-        setUser(null);
-        setRole('cliente');
+        setCarregando(false);
       }
+    };
+
+    // IMPORTANTE: o supabase-js executa este callback SEGURANDO o lock de
+    // autenticação. Chamar a API aqui dentro (que faz getSession) travava
+    // a sessão — causa dos "carregando infinito" e 401 intermitentes no
+    // app. Por isso o trabalho é adiado com setTimeout, como recomenda a
+    // documentação do Supabase. INITIAL_SESSION cobre a carga inicial
+    // (não precisa de um getSession separado), e renovações de token não
+    // recarregam o perfil à toa.
+    const { data: listener } = supabase.auth.onAuthStateChange((evento, session) => {
+      if (evento === 'TOKEN_REFRESHED' && session?.user?.id === usuarioAtual) return;
+      setTimeout(() => aplicarSessao(session), 0);
     });
 
     return () => {
@@ -79,18 +89,35 @@ export function useAuth() {
   }, []);
 
   const cadastrar = useCallback(async ({ email, password, nome, telefone, bancoConectado }) => {
-    // Nota: CPF é um dado sensível — se for realmente necessário para o
-    // seu fluxo de Open Finance, armazene-o de forma criptografada e
-    // nunca o devolva em claro pela API. Considere se você precisa dele
-    // no seu banco ou se a Pluggy já cuida da identificação via o
-    // próprio login bancário do usuário.
+    // LGPD / minimização: não pedimos CPF. O Open Finance identifica a
+    // pessoa pelo próprio login bancário, e o restante do cadastro
+    // (nascimento, UF, profissão...) é preenchido depois em "Meu Cadastro".
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { nome, telefone, banco_conectado: bancoConectado } },
     });
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (/already registered|already exists/i.test(error.message)) throw new Error('Este e-mail já tem cadastro. Faça login ou recupere a senha.');
+      if (/password/i.test(error.message)) throw new Error('Senha fraca: use pelo menos 8 caracteres, com letras e números.');
+      throw new Error('Não foi possível criar a conta agora. Tente novamente.');
+    }
     return data;
+  }, []);
+
+  const recuperarSenha = useCallback(async (email) => {
+    // A resposta é sempre a mesma, exista ou não a conta (não revela
+    // quais e-mails estão cadastrados).
+    await supabase.auth.resetPasswordForEmail(email).catch(() => {});
+  }, []);
+
+  const recarregarPerfil = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      const perfil = await carregarPerfil(session.user);
+      setUser(perfil);
+      setRole(perfil.role);
+    }
   }, []);
 
   const logout = useCallback(async () => {
@@ -109,5 +136,7 @@ export function useAuth() {
     login,
     cadastrar,
     logout,
+    recuperarSenha,
+    recarregarPerfil,
   };
 }

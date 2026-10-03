@@ -1,141 +1,111 @@
-import React from 'react';
-import MetricCard from '../../components/MetricCard';
+import React, { useRef } from 'react';
+import { Card, Metrica, Vazio, Carregando, Barra, Alerta, useValores } from '../../components/ui';
+import MenuExportar from '../../components/MenuExportar';
+import { categoriaInfo } from '../../lib/categorias';
+import { formatarMes, formatarMoeda, formatarPct } from '../../lib/format';
 
 /**
- * Visão geral do administrador: métricas consolidadas de TODOS os
- * usuários, despesas por categoria somadas e um ranking de usuários por
- * volume de gastos. Clicar em um usuário leva para a visão individual
- * dele (via onSelecionarUsuario).
+ * Visão geral da equipe: oule vê todos os clientes; planejador, só os
+ * dele (o backend já filtra).
  */
-export default function AdminOverviewPage({ overview, loading, formatCurrency, onSelecionarUsuario }) {
-  if (loading && !overview) {
-    return (
-      <div className="empty-state-box">
-        <p>Carregando dados consolidados de todos os usuários...</p>
-      </div>
-    );
-  }
+export default function AdminOverviewPage({ overview, loading, erro, onSelecionarUsuario }) {
+  const { fmt } = useValores();
+  const ref = useRef(null);
 
-  if (!overview) {
-    return (
-      <div className="empty-state-box">
-        <p>Não foi possível carregar os dados administrativos.</p>
-      </div>
-    );
-  }
+  if (loading && !overview) return <Carregando texto="Carregando dados consolidados..." />;
+  if (!overview) return <Alerta>{erro || 'Não foi possível carregar os dados.'}</Alerta>;
 
   const { resumo, categorias, evolucaoMensal, usuarios } = overview;
-  const maiorMovimento = evolucaoMensal.reduce((max, m) => Math.max(max, m.entradas, m.saidas), 0) || 1;
+  const maior = Math.max(1, ...evolucaoMensal.map((m) => Math.max(m.entradas, m.saidas)));
+
+  const dadosExportacao = () => ({
+    resumo: [
+      { rotulo: 'Clientes', valor: String(resumo.totalUsuarios) },
+      { rotulo: 'Entradas', valor: formatarMoeda(resumo.totalEntradas) },
+      { rotulo: 'Saídas', valor: formatarMoeda(resumo.totalSaidas) },
+    ],
+    colunas: [
+      { titulo: 'Código', chave: 'codigoCliente' },
+      { titulo: 'Cliente', largura: 26, chave: 'nome' },
+      { titulo: 'E-mail', largura: 28, chave: 'email' },
+      { titulo: 'UF', chave: 'estado' },
+      { titulo: 'Entradas', tipo: 'moeda', chave: 'totalEntradas' },
+      { titulo: 'Saídas', tipo: 'moeda', chave: 'totalSaidas' },
+      { titulo: 'Saldo', tipo: 'moeda', chave: 'saldoLiquido' },
+      { titulo: 'Transações', chave: 'totalTransacoes' },
+    ],
+    linhas: usuarios,
+  });
 
   return (
-    <>
-      <div className="metrics-grid">
-        <MetricCard label="USUÁRIOS ATIVOS" icon="👥" value={resumo.totalUsuarios} color="#8b5cf6" />
-        <MetricCard label="SALDO CONSOLIDADO" icon="💰" value={formatCurrency(resumo.saldoConsolidado)} color={resumo.saldoConsolidado >= 0 ? '#10b981' : '#ef4444'} />
-        <MetricCard label="ENTRADAS (TODOS)" icon="📥" value={formatCurrency(resumo.totalEntradas)} color="#10b981" />
-        <MetricCard label="SAÍDAS (TODOS)" icon="📤" value={formatCurrency(resumo.totalSaidas)} color="#ef4444" />
+    <div className="pilha" ref={ref}>
+      <div className="linha" style={{ justifyContent: 'flex-end' }}>
+        <MenuExportar nome="visao-geral-clientes" titulo="Visão geral dos clientes" dados={dadosExportacao} alvoPng={ref} />
+      </div>
+      <div className="metricas">
+        <Metrica rotulo="Clientes" icone="👥" valor={resumo.totalUsuarios} tom="roxo" />
+        <Metrica rotulo="Saldo consolidado" icone="💰" valor={fmt(resumo.saldoConsolidado)} tom={resumo.saldoConsolidado >= 0 ? 'positivo' : 'negativo'} />
+        <Metrica rotulo="Entradas" icone="📥" valor={fmt(resumo.totalEntradas)} tom="positivo" />
+        <Metrica rotulo="Saídas" icone="📤" valor={fmt(resumo.totalSaidas)} tom="negativo" />
       </div>
 
-      <div className="dashboard-grid-modern" style={{ marginTop: '20px' }}>
-        <div className="chart-card">
-          <div className="card-header-flex">
-            <h3>📊 Despesas por Categoria — Todos os Usuários</h3>
-            <span className="badge-count">{categorias.length} categorias</span>
-          </div>
-          {categorias.length === 0 ? (
-            <div className="empty-state-box"><p>Nenhuma despesa registrada ainda.</p></div>
-          ) : (
-            <div className="bar-list">
+      <div className="grade-lateral">
+        <Card titulo="Despesas por categoria" icone="📊">
+          {categorias.length === 0 ? <Vazio texto="Nenhuma despesa registrada ainda." /> : (
+            <div className="lista-barras">
               {categorias.map(({ categoria, valor }) => {
-                const percentual = resumo.totalSaidas > 0 ? (valor / resumo.totalSaidas) * 100 : 0;
+                const pct = resumo.totalSaidas > 0 ? (valor / resumo.totalSaidas) * 100 : 0;
+                const info = categoriaInfo(categoria);
                 return (
-                  <div key={categoria} className="bar-item">
-                    <div className="bar-label">
-                      <span className="cat-name">{categoria}</span>
-                      <span className="cat-value" style={{ color: '#ef4444' }}>
-                        {formatCurrency(valor)} <small>({percentual.toFixed(1)}%)</small>
-                      </span>
-                    </div>
-                    <div className="bar-track">
-                      <div className="bar-fill" style={{ width: `${percentual}%` }}></div>
-                    </div>
+                  <div key={categoria}>
+                    <div className="item-barra-topo"><span className="item-barra-nome">{info.icone} {categoria}</span><span className="item-barra-valor">{fmt(valor)} <small>({formatarPct(pct)})</small></span></div>
+                    <Barra pct={pct} cor={info.cor} />
                   </div>
                 );
               })}
             </div>
           )}
-        </div>
-
-        <div className="side-dashboard-column">
-          <div className="chart-card">
-            <h3>📈 Evolução Mensal (Todos)</h3>
-            {evolucaoMensal.length === 0 ? (
-              <p className="empty-text">Sem histórico suficiente ainda.</p>
-            ) : (
-              <div className="bar-list">
-                {evolucaoMensal.map((m) => (
-                  <div key={m.mes} className="bar-item">
-                    <div className="bar-label">
-                      <span className="cat-name">{m.mes}</span>
-                      <span className="cat-value" style={{ color: '#10b981' }}>{formatCurrency(m.entradas)}</span>
-                    </div>
-                    <div className="bar-track">
-                      <div className="bar-fill" style={{ width: `${(m.entradas / maiorMovimento) * 100}%`, background: '#10b981' }}></div>
-                    </div>
-                    <div className="bar-track" style={{ marginTop: '4px' }}>
-                      <div className="bar-fill" style={{ width: `${(m.saidas / maiorMovimento) * 100}%`, background: '#ef4444' }}></div>
-                    </div>
-                    <div className="bar-label" style={{ marginTop: '2px' }}>
-                      <span></span>
-                      <span className="cat-value" style={{ color: '#ef4444' }}>{formatCurrency(m.saidas)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="table-card" style={{ marginTop: '20px' }}>
-        <div className="card-header-flex" style={{ marginBottom: '16px' }}>
-          <h3>🏆 Ranking de Usuários por Gasto Total</h3>
-          <span className="badge-count">{usuarios.length} usuários</span>
-        </div>
-
-        {usuarios.length === 0 ? (
-          <div className="empty-state-box"><p>Nenhum usuário cadastrado além do administrador.</p></div>
-        ) : (
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>Usuário</th>
-                <th>Banco</th>
-                <th>Total Entradas</th>
-                <th>Total Saídas</th>
-                <th>Saldo Líquido</th>
-                <th>Transações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {usuarios.map((u) => (
-                <tr key={u.id} onClick={() => onSelecionarUsuario(u.id)} style={{ cursor: 'pointer' }}>
-                  <td>
-                    <strong>{u.nome}</strong>
-                    <br />
-                    <small style={{ color: '#64748b' }}>{u.email}</small>
-                  </td>
-                  <td>{u.bancoConectado ? <span className="tag tag-bank">{u.bancoConectado}</span> : '—'}</td>
-                  <td style={{ color: '#10b981', fontWeight: 600 }}>{formatCurrency(u.totalEntradas)}</td>
-                  <td style={{ color: '#ef4444', fontWeight: 600 }}>{formatCurrency(u.totalSaidas)}</td>
-                  <td style={{ fontWeight: 700, color: u.saldoLiquido >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(u.saldoLiquido)}</td>
-                  <td className="center-text">{u.totalTransacoes}</td>
-                </tr>
+        </Card>
+        <Card titulo="Últimos 6 meses" icone="📈">
+          {evolucaoMensal.length === 0 ? <Vazio texto="Sem histórico suficiente." /> : (
+            <div className="lista-barras">
+              {evolucaoMensal.map((m) => (
+                <div key={m.mes}>
+                  <div className="item-barra-topo"><span className="item-barra-nome">{formatarMes(m.mes, { curto: true })}</span><span className="item-barra-valor positivo">{fmt(m.entradas)}</span></div>
+                  <Barra pct={(m.entradas / maior) * 100} cor="var(--sucesso)" />
+                  <div style={{ height: 4 }} />
+                  <Barra pct={(m.saidas / maior) * 100} cor="var(--perigo)" />
+                  <div className="item-barra-topo" style={{ marginTop: 2 }}><span /><span className="item-barra-valor negativo">{fmt(m.saidas)}</span></div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        )}
+            </div>
+          )}
+        </Card>
       </div>
-    </>
+
+      <Card titulo="Clientes por volume de gastos" icone="🏆" semPadding>
+        {usuarios.length === 0 ? <Vazio icone="👥" texto="Nenhum cliente no seu escopo ainda." /> : (
+          <div className="tabela-wrapper">
+            <table className="tabela">
+              <thead>
+                <tr><th>Cliente</th><th>Código</th><th className="num">Entradas</th><th className="num">Saídas</th><th className="num">Saldo</th><th className="num">Transações</th></tr>
+              </thead>
+              <tbody>
+                {usuarios.map((u) => (
+                  <tr key={u.id} className="clicavel" onClick={() => onSelecionarUsuario(u.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelecionarUsuario(u.id)}>
+                    <td><strong>{u.nome}</strong><div className="texto-suave texto-pequeno">{u.email}</div></td>
+                    <td>{u.codigoCliente ? <span className="codigo-cliente" style={{ fontSize: 11 }}>{u.codigoCliente}</span> : '—'}</td>
+                    <td className="num positivo">{fmt(u.totalEntradas)}</td>
+                    <td className="num negativo">{fmt(u.totalSaidas)}</td>
+                    <td className={`num ${u.saldoLiquido >= 0 ? 'positivo' : 'negativo'}`}><strong>{fmt(u.saldoLiquido)}</strong></td>
+                    <td className="num">{u.totalTransacoes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }

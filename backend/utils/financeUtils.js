@@ -6,7 +6,7 @@ import crypto from 'crypto';
  * transferência recebida ou um estorno continuam sendo entrada, mesmo
  * que a categoria não pareça "renda".
  */
-const ORIGENS_SINAL_CONFIAVEL = new Set(['open_finance', 'extrato_manual', 'extrato_planilha', 'lancamento']);
+const ORIGENS_SINAL_CONFIAVEL = new Set(['open_finance', 'extrato_manual', 'extrato_planilha', 'lancamento', 'whatsapp']);
 
 /**
  * Valor com o sinal correto (negativo = saída, positivo = entrada).
@@ -112,4 +112,9 @@ export function idadeEmAnos(dataNascimento, referenciaIso = hojeBrasil()) {
 
 export function formatarMoeda(valor) {
   return `R$ ${Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** 28.75 -> "28,8%" (padrão brasileiro, usado nos textos das conclusões). */
+export function formatarPct(valor, casas = 1) {
+  return `${Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
 }

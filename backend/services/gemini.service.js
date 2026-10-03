@@ -1,6 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { comprovanteSchema } from '../validators/schemas.js';
 import { extratoRespostaSchema } from '../validators/extrato.schema.js';
+import { CATEGORIA_IDS } from '../utils/categorias.js';
+import { httpError } from '../utils/http.js';
+
+const LISTA_CATEGORIAS = CATEGORIA_IDS.join(' | ');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
@@ -58,7 +62,7 @@ const PROMPT_COMPROVANTE = `Analise este comprovante de pagamento ou nota fiscal
   "estabelecimento": "Nome da empresa/recebedor",
   "valor": 0.00,
   "data": "AAAA-MM-DD",
-  "categoria": "Salário | Alimentação | Transporte | Serviços | Lazer | Outros",
+  "categoria": "${LISTA_CATEGORIAS}",
   "metodo_pagamento": "Pix | Cartão | Boleto | Dinheiro"
 }
 Responda APENAS o JSON bruto sem formatação Markdown extra. Não inclua nenhum texto fora do JSON.`;
@@ -73,7 +77,7 @@ Retorne EXATAMENTE um JSON válido no formato:
       "descricao": "Descrição/estabelecimento exatamente como aparece",
       "valor": -123.45,
       "tipo": "entrada | saida",
-      "categoria": "Alimentação | Transporte | Moradia | Saúde | Educação | Lazer | Compras | Serviços | Salário | Investimento | Transferência | Outros"
+      "categoria": "${LISTA_CATEGORIAS}"
     }
   ]
 }
@@ -84,6 +88,8 @@ Regras OBRIGATÓRIAS:
 - Se o extrato não informar o ano, assuma o ano mais recente coerente com o contexto do documento.
 - Nunca invente lançamentos que não estão no documento. Se não conseguir ler nenhum lançamento, retorne {"transacoes": []}.
 - Escolha a categoria mais próxima da lista acima; se nenhuma encaixar bem, use "Outros".
+- Pagamento da própria fatura do cartão e transferência entre contas da mesma pessoa são "Transferências".
+- Em FATURA de cartão, compras são saídas (valor negativo) e o pagamento da fatura é "Transferências".
 - Responda APENAS o JSON bruto, sem Markdown, sem comentários, sem texto fora do JSON.`;
 
 async function chamarComRetry(model, payload, maxRetries = 2) {
@@ -106,79 +112,76 @@ async function chamarComRetry(model, payload, maxRetries = 2) {
 }
 
 /**
+ * Chama o modelo principal e, se falhar, o de reserva. Qualquer falha de
+ * infraestrutura (cota, rede, chave ausente) vira um erro com mensagem
+ * pública genérica — a mensagem interna do Google fica só no log.
+ */
+async function gerarComFallback(principal, reserva, partes, contexto) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw httpError(503, 'A leitura com IA não está configurada no servidor. Use um arquivo CSV, XLS, XLSX ou OFX.');
+  }
+  try {
+    return await chamarComRetry(principal, partes);
+  } catch (errPrincipal) {
+    console.warn(`⚠️ Falha no modelo principal do Gemini (${contexto}), tentando fallback...`, errPrincipal.message);
+    try {
+      return await chamarComRetry(reserva, partes);
+    } catch (errReserva) {
+      console.error(`❌ Gemini indisponível (${contexto}):`, errReserva.message);
+      throw httpError(503, 'O serviço de leitura com IA está indisponível agora. Tente novamente em alguns minutos.');
+    }
+  }
+}
+
+function lerJsonDaResposta(response, mensagemErro) {
+  const textoLimpo = response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
+  if (!textoLimpo) {
+    console.error('⚠️ Gemini devolveu resposta vazia.', {
+      finishReason: response.candidates?.[0]?.finishReason,
+      usage: response.usageMetadata,
+    });
+  }
+  try {
+    return JSON.parse(textoLimpo);
+  } catch {
+    throw httpError(422, mensagemErro);
+  }
+}
+
+/**
  * Analisa um comprovante com a IA e SEMPRE valida a saída com zod antes
  * de devolver. Uma alucinação da IA (categoria fora da lista, valor
  * absurdo, string maliciosa) nunca chega "crua" ao banco de dados.
  */
 export async function analisarComprovante(buffer, mimeType = 'image/jpeg') {
   const imagePart = { inlineData: { data: buffer.toString('base64'), mimeType } };
-
-  let result;
-  try {
-    result = await chamarComRetry(primaryModel, [PROMPT_COMPROVANTE, imagePart]);
-  } catch (err) {
-    console.warn('⚠️ Falha no modelo principal do Gemini, tentando fallback...');
-    result = await chamarComRetry(fallbackModel, [PROMPT_COMPROVANTE, imagePart]);
-  }
-
-  const response = await result.response;
-  const textoLimpo = response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
-
-  let bruto;
-  try {
-    bruto = JSON.parse(textoLimpo);
-  } catch (err) {
-    throw new Error('A IA não retornou um JSON válido para este comprovante.');
-  }
+  const result = await gerarComFallback(primaryModel, fallbackModel, [PROMPT_COMPROVANTE, imagePart], 'comprovante');
+  const bruto = lerJsonDaResposta(await result.response, 'A IA não conseguiu ler este comprovante.');
 
   const validado = comprovanteSchema.safeParse(bruto);
   if (!validado.success) {
-    throw new Error('Dados extraídos do comprovante estão fora do formato esperado.');
+    throw httpError(422, 'Dados extraídos do comprovante estão fora do formato esperado.');
   }
-
   return validado.data;
 }
 
 /**
- * Analisa um extrato bancário (PDF ou imagem) com a IA e SEMPRE valida
- * a saída com zod antes de devolver — mesma filosofia de
- * analisarComprovante(): uma alucinação da IA nunca chega "crua" ao
- * banco de dados financeiro da pessoa.
+ * Analisa um extrato bancário ou fatura (PDF, imagem ou texto de
+ * planilha com layout desconhecido) com a IA e SEMPRE valida a saída com
+ * zod antes de devolver.
  */
 export async function analisarExtratoBancario(buffer, mimeType = 'application/pdf') {
   const filePart = { inlineData: { data: buffer.toString('base64'), mimeType } };
-
-  let result;
-  try {
-    result = await chamarComRetry(extratoModel, [PROMPT_EXTRATO, filePart]);
-  } catch (err) {
-    console.warn('⚠️ Falha no modelo principal do Gemini para extrato, tentando fallback...');
-    result = await chamarComRetry(extratoFallbackModel, [PROMPT_EXTRATO, filePart]);
-  }
-
-  const response = await result.response;
-  const textoLimpo = response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
-
-  if (!textoLimpo) {
-    const finishReason = response.candidates?.[0]?.finishReason;
-    console.error('⚠️ Gemini devolveu resposta vazia ao ler extrato.', {
-      finishReason,
-      usage: response.usageMetadata,
-    });
-  }
-
-  let bruto;
-  try {
-    bruto = JSON.parse(textoLimpo);
-  } catch (err) {
-    throw new Error('A IA não retornou um JSON válido para este extrato. Tente novamente ou envie um arquivo mais legível.');
-  }
+  const result = await gerarComFallback(extratoModel, extratoFallbackModel, [PROMPT_EXTRATO, filePart], 'extrato');
+  const bruto = lerJsonDaResposta(
+    await result.response,
+    'A IA não conseguiu ler este extrato. Tente novamente ou envie um arquivo mais legível (de preferência CSV/XLS/OFX exportado do banco).'
+  );
 
   const validado = extratoRespostaSchema.safeParse(bruto);
   if (!validado.success) {
-    throw new Error('Os lançamentos extraídos do extrato estão fora do formato esperado.');
+    throw httpError(422, 'Os lançamentos extraídos do extrato estão fora do formato esperado.');
   }
-
   return validado.data.transacoes;
 }
 

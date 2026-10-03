@@ -2,25 +2,28 @@ import 'dotenv/config';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 
 /**
- * Script único para criar (ou atualizar a senha de) a conta de
- * administrador no Supabase Auth. Rode uma vez com:
+ * Cria (ou redefine a senha de) a conta de administrador no Supabase
+ * Auth. Rode uma vez com:  npm run admin:criar
  *
- *   cd backend && node scripts/create-admin-user.js
+ * A conta é reconhecida como admin porque o e-mail bate com ADMIN_EMAIL
+ * (ver middleware/auth.js) e é criada já com o e-mail confirmado.
  *
- * A conta criada aqui é reconhecida como admin pelo backend porque o
- * e-mail dela bate com ADMIN_EMAIL (ver backend/middleware/auth.js).
- * Nenhum papel/flag precisa ser cadastrado em outra tabela.
- *
- * ⚠️ SEGURANÇA: a senha padrão abaixo (12345678) é fraca de propósito
- * apenas para você conseguir entrar pela primeira vez. Esta conta tem
- * acesso de leitura aos dados financeiros de TODOS os usuários — troque
- * a senha assim que possível (Supabase Studio → Authentication → Users
- * → selecione o admin → "Reset password", ou rode este script de novo
- * com outra senha na variável ADMIN_PASSWORD).
+ * SEGURANÇA: esta conta enxerga os dados financeiros de TODOS os
+ * clientes. Não existe senha padrão — defina ADMIN_PASSWORD (mínimo 12
+ * caracteres, com letras e números) e apague-a do .env depois.
  */
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@gmail.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '12345678';
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+
+if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ADMIN_EMAIL)) {
+  console.error('❌ Defina ADMIN_EMAIL no .env com um e-mail válido.');
+  process.exit(1);
+}
+if (ADMIN_PASSWORD.length < 12 || !/[A-Za-z]/.test(ADMIN_PASSWORD) || !/\d/.test(ADMIN_PASSWORD)) {
+  console.error('❌ Defina ADMIN_PASSWORD no .env com pelo menos 12 caracteres, incluindo letras e números.');
+  process.exit(1);
+}
 
 async function main() {
   const { data: existentes, error: erroListagem } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -47,7 +50,7 @@ async function main() {
   if (error) throw error;
 
   console.log(`✅ Conta admin criada: ${ADMIN_EMAIL}`);
-  console.log('⚠️  Troque a senha padrão assim que possível.');
+  console.log('⚠️  Agora apague ADMIN_PASSWORD do .env.');
 }
 
 main().catch((err) => {

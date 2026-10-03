@@ -101,7 +101,7 @@ const REGRAS = [
   [/entrepreneur|government aid|non.?recurring income|retirement|aposentadoria|beneficio|inss credito|freela|renda extra/, 'Renda Extra'],
   // Neutras de verdade: pagar a fatura do cartão (as compras já foram
   // contadas uma a uma) e mover dinheiro entre contas da própria pessoa.
-  [/credit card payment|pagamento de fatura|pgto fatura|pag fatura|pagto cartao|same person transfer|mesma titularidade|entre contas|resgate automatico|aplicacao automatica/, 'Transferências'],
+  [/credit card payment|pagamento recebido|pagamento efetuado|pagamento da fatura|pagamento de fatura|pgto fatura|pag fatura|pagto cartao|same person transfer|mesma titularidade|entre contas|resgate automatico|aplicacao automatica/, 'Transferências'],
   // PIX/TED/DOC genérico: pode ser renda (cliente pagando) ou gasto
   // (pagando alguém). Decidido pelo sinal em normalizarCategoria().
   [/transfer|\btransf\b|\bted\b|\bdoc\b|\bpix\b|mercado ?pago|picpay/, TRANSFERENCIA_GENERICA],
@@ -124,10 +124,11 @@ const REGRAS = [
   [/shopping|compras|electronic|eletronic|clothing|vestuario|roupa|calcado|magazine luiza|magalu|americanas|casas bahia|mercado ?livre|shopee|aliexpress|shein|amazon|renner|riachuelo|\bc&a\b|\bzara\b|centauro|netshoes|kalunga|leroy merlin|ikea|tok ?stok/, 'Compras'],
 ];
 
-function porRegras(texto) {
+function porRegras(texto, { ignorarGenerica = false } = {}) {
   const t = semAcento(texto);
   if (!t) return null;
   for (const [regex, categoria] of REGRAS) {
+    if (ignorarGenerica && categoria === TRANSFERENCIA_GENERICA) continue;
     if (regex.test(t)) return categoria;
   }
   return null;
@@ -140,22 +141,29 @@ function porRegras(texto) {
  * @param {string|null} categoriaBruta - ex.: "Groceries", "Serviços", "Outro"
  * @param {string} [descricao] - usada como pista quando a categoria
  *   bruta é vazia/genérica (ex.: "UBER *TRIP" -> Transporte).
+ * @param {number} [valor] - sinal usado para decidir PIX/TED genérico
+ *   (positivo = Renda Extra, negativo = Outros).
  */
-export function normalizarCategoria(categoriaBruta, descricao = '') {
+export function normalizarCategoria(categoriaBruta, descricao = '', valor = null) {
   const bruto = semAcento(categoriaBruta);
+  let resultado = null;
 
   if (bruto) {
     const exata = POR_NOME_NORMALIZADO.get(bruto) || ALIASES[bruto];
     if (exata && exata !== 'Outros') return exata;
-
-    const porCategoria = porRegras(bruto);
-    if (porCategoria) return porCategoria;
+    resultado = porRegras(bruto);
   }
 
-  const porDescricao = porRegras(descricao);
-  if (porDescricao) return porDescricao;
+  if (!resultado || resultado === TRANSFERENCIA_GENERICA) {
+    // A descrição costuma ser mais específica ("PIX ENVIADO - UBER").
+    const porDescricao = porRegras(descricao, { ignorarGenerica: resultado === TRANSFERENCIA_GENERICA });
+    if (porDescricao) resultado = porDescricao;
+  }
 
-  return 'Outros';
+  if (resultado === TRANSFERENCIA_GENERICA) {
+    return Number(valor) > 0 ? 'Renda Extra' : 'Outros';
+  }
+  return resultado || 'Outros';
 }
 
 export function categoriaInfo(id) {

@@ -1,256 +1,318 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useAuth } from './hooks/useAuth';
-import { fetchApi } from './lib/api';
-import { getValorAjustado } from './lib/finance';
 import './App.css';
+import { useAuth } from './hooks/useAuth';
+import { api } from './lib/api';
 import Sidebar from './components/Sidebar';
-import MetricCard from './components/MetricCard';
+import { ValoresProvider, ToastProvider, useValores, Carregando } from './components/ui';
 import AuthPage from './pages/AuthPage';
-import DashboardPage from './pages/DashboardPage';
-import TransacoesPage from './pages/TransacoesPage';
-import OpenFinancePage from './pages/OpenFinancePage';
-import WhatsappBotPage from './pages/WhatsappBotPage';
-import ConfiguracoesPage from './pages/ConfiguracoesPage';
-import AdminOverviewPage from './pages/admin/AdminOverviewPage';
-import AdminUsuariosPage from './pages/admin/AdminUsuariosPage';
-import AdminPlanejadoresPage from './pages/admin/AdminPlanejadoresPage';
-import ObjetivosPage from './pages/ObjetivosPage';
-import ImportarExtratoPage from './pages/ImportarExtratoPage';
 
-export default function App() {
-  const { user, role, isAdmin, isStaff, carregando, login, cadastrar, logout } = useAuth();
+// Páginas carregadas sob demanda: o app abre mais rápido no celular.
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const TransacoesPage = lazy(() => import('./pages/TransacoesPage'));
+const PlanoPage = lazy(() => import('./pages/PlanoPage'));
+const FuturoPage = lazy(() => import('./pages/FuturoPage'));
+const ObjetivosPage = lazy(() => import('./pages/ObjetivosPage'));
+const PagamentosPage = lazy(() => import('./pages/PagamentosPage'));
+const CartoesPage = lazy(() => import('./pages/CartoesPage'));
+const AnalisesPage = lazy(() => import('./pages/AnalisesPage'));
+const RetrospectivaPage = lazy(() => import('./pages/RetrospectivaPage'));
+const OpenFinancePage = lazy(() => import('./pages/OpenFinancePage'));
+const ImportarExtratoPage = lazy(() => import('./pages/ImportarExtratoPage'));
+const WhatsappBotPage = lazy(() => import('./pages/WhatsappBotPage'));
+const PerfilPage = lazy(() => import('./pages/PerfilPage'));
+const ConfiguracoesPage = lazy(() => import('./pages/ConfiguracoesPage'));
+const AdminOverviewPage = lazy(() => import('./pages/admin/AdminOverviewPage'));
+const AdminUsuariosPage = lazy(() => import('./pages/admin/AdminUsuariosPage'));
+const AdminAnalisesPage = lazy(() => import('./pages/admin/AdminAnalisesPage'));
+const AdminPlanejadoresPage = lazy(() => import('./pages/admin/AdminPlanejadoresPage'));
 
-  const [transacoes, setTransacoes] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [abaAtiva, setAbaAtiva] = useState('Dashboard');
-  const [esconderValores, setEsconderValores] = useState(false);
+/**
+ * Páginas por papel. `dinheiro: true` = a página mostra valores, então
+ * ganha o botão "Ocultar valores" (antes ele aparecia até em telas sem
+ * nenhum valor, como WhatsApp e Configurações).
+ */
+const PAGINAS_CLIENTE = [
+  {
+    grupo: 'Início',
+    itens: [
+      { id: 'inicio', nome: 'Visão Geral', icone: '📊', dinheiro: true, subtitulo: 'Como está o seu mês, com dicas para o seu dinheiro render mais.' },
+      { id: 'transacoes', nome: 'Transações', icone: '💱', dinheiro: true, subtitulo: 'Extrato completo: filtre, recategorize e lance gastos manuais.' },
+    ],
+  },
+  {
+    grupo: 'Planejamento',
+    itens: [
+      { id: 'plano', nome: 'Plano x Vida Real', icone: '🗓️', dinheiro: true, subtitulo: 'Planeje o ano (e os próximos) e compare com o que aconteceu de verdade.' },
+      { id: 'futuro', nome: 'Futuro & Aposentadoria', icone: '🔭', dinheiro: true, subtitulo: 'Para onde o seu ritmo atual leva — sonhos, patrimônio e liberdade financeira.' },
+      { id: 'sonhos', nome: 'Sonhos & Metas', icone: '🎯', dinheiro: true, subtitulo: 'Cadastre seus sonhos e acompanhe quanto falta para cada um.' },
+      { id: 'pagamentos', nome: 'Pagamentos do mês', icone: '🧾', dinheiro: true, subtitulo: 'Contas fixas, vencimentos e lembretes.' },
+      { id: 'cartoes', nome: 'Cartões & Faturas', icone: '💳', dinheiro: true, subtitulo: 'Cada compra na fatura certa: data da compra x data do pagamento.' },
+    ],
+  },
+  {
+    grupo: 'Análises',
+    itens: [
+      { id: 'analises', nome: 'Análise de Gastos', icone: '📈', dinheiro: true, subtitulo: 'Seus gastos por categoria e tipo, comparados a pessoas com perfil parecido.' },
+      { id: 'retrospectiva', nome: 'Retrospectiva do Ano', icone: '🎉', dinheiro: true, subtitulo: 'O seu ano em números.' },
+    ],
+  },
+  {
+    grupo: 'Conexões',
+    itens: [
+      { id: 'openfinance', nome: 'Open Finance', icone: '🏦', subtitulo: 'Conecte bancos e cartões para importar tudo automaticamente.' },
+      { id: 'importar', nome: 'Importar Extrato', icone: '📄', subtitulo: 'Envie o extrato ou a fatura em CSV, Excel, OFX, PDF ou foto.' },
+      { id: 'whatsapp', nome: 'WhatsApp Bot', icone: '📲', subtitulo: 'Comprovantes, resumo do mês e lembretes pelo WhatsApp.' },
+    ],
+  },
+  {
+    grupo: 'Conta',
+    itens: [
+      { id: 'perfil', nome: 'Meu Cadastro', icone: '👤', subtitulo: 'Seus dados, TAGs de perfil e código de cliente.' },
+      { id: 'config', nome: 'Configurações', icone: '⚙️', subtitulo: 'Tema, exportação de dados e conexão.' },
+    ],
+  },
+];
 
-  const [configs, setConfigs] = useState(() => {
-    const salvo = localStorage.getItem('app_configs'); // apenas preferências de UI, nunca dados financeiros
-    return salvo ? JSON.parse(salvo) : { tema: 'claro', limiteGastos: 5000, moeda: 'BRL' };
-  });
+function paginasStaff(isAdmin) {
+  return [
+    {
+      grupo: isAdmin ? 'Administração' : 'Meus clientes',
+      itens: [
+        { id: 'visao', nome: 'Visão Geral', icone: '📊', dinheiro: true, subtitulo: isAdmin ? 'Dados consolidados de todos os clientes.' : 'Dados consolidados dos seus clientes.' },
+        { id: 'clientes', nome: 'Clientes', icone: '👥', dinheiro: true, subtitulo: 'Abra um cliente para planejar, importar e ajustar tudo por ele.' },
+        { id: 'analises', nome: 'Análise por Perfil', icone: '📈', dinheiro: true, subtitulo: 'Gastos por categoria cruzados por estado, faixa etária e forma de trabalho.' },
+        ...(isAdmin
+          ? [
+              { id: 'planejadores', nome: 'Planejadores', icone: '🧭', subtitulo: 'Quem é planejador e quais clientes cada um atende.' },
+              { id: 'whatsapp', nome: 'WhatsApp Bot', icone: '📲', subtitulo: 'Conexão do número do assistente.' },
+            ]
+          : []),
+      ],
+    },
+    {
+      grupo: 'Conta',
+      itens: [
+        { id: 'perfil', nome: 'Meu Cadastro', icone: '👤', subtitulo: 'Seus dados de acesso.' },
+        { id: 'config', nome: 'Configurações', icone: '⚙️', subtitulo: 'Tema e conexão.' },
+      ],
+    },
+  ];
+}
 
-  const [busca, setBusca] = useState('');
-  const [filtroCategoria, setFiltroCategoria] = useState('Todas');
+// ---------------------------------------------------------------------
+// Tema (claro / noturno / seguir o sistema)
+// ---------------------------------------------------------------------
+function lerTema() {
+  try {
+    const salvo = JSON.parse(localStorage.getItem('app_configs') || '{}');
+    return ['claro', 'noturno', 'sistema'].includes(salvo.tema) ? salvo.tema : 'claro';
+  } catch {
+    return 'claro';
+  }
+}
 
-  // Estado exclusivo da visão de administrador.
-  const [adminAba, setAdminAba] = useState('Visão Geral');
-  const [adminOverview, setAdminOverview] = useState(null);
-  const [adminLoading, setAdminLoading] = useState(false);
-  const [usuarioSelecionadoId, setUsuarioSelecionadoId] = useState(null);
-
+function useTema() {
+  const [tema, setTema] = useState(lerTema);
   useEffect(() => {
-    localStorage.setItem('app_configs', JSON.stringify(configs));
-    document.documentElement.classList.toggle('dark', configs.tema === 'noturno');
-  }, [configs]);
-
-  const fetchTransacoes = useCallback(async () => {
-    if (!user?.id || isStaff) return;
-    setLoading(true);
     try {
-      const data = await fetchApi('/transacoes');
-      setTransacoes(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Erro ao buscar transações:', err.message);
-      setTransacoes([]);
-    } finally {
-      setLoading(false);
+      localStorage.setItem('app_configs', JSON.stringify({ tema }));
+    } catch {
+      /* sem armazenamento: vale só nesta sessão */
     }
-  }, [user?.id, isStaff]);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const aplicar = () => {
+      const escuro = tema === 'noturno' || (tema === 'sistema' && mq.matches);
+      document.documentElement.classList.toggle('dark', escuro);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', escuro ? '#070b14' : '#111827');
+    };
+    aplicar();
+    if (tema !== 'sistema') return undefined;
+    mq.addEventListener('change', aplicar);
+    return () => mq.removeEventListener('change', aplicar);
+  }, [tema]);
+  return [tema, setTema];
+}
+
+// ---------------------------------------------------------------------
+// Aba atual guardada no endereço (#plano): F5 e "voltar" funcionam.
+// ---------------------------------------------------------------------
+function useAbaNaUrl(padrao, validas) {
+  const ler = useCallback(() => {
+    const hash = window.location.hash.replace('#', '');
+    return validas.includes(hash) ? hash : padrao;
+  }, [padrao, validas]);
+  const [aba, setAbaState] = useState(ler);
 
   useEffect(() => {
-    fetchTransacoes();
-  }, [fetchTransacoes]);
+    setAbaState(ler());
+    const onHash = () => setAbaState(ler());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [ler]);
 
-  const fetchAdminOverview = useCallback(async () => {
-    setAdminLoading(true);
+  const setAba = useCallback((nova) => {
+    if (window.location.hash !== `#${nova}`) window.location.hash = nova;
+    setAbaState(nova);
+    window.scrollTo({ top: 0 });
+  }, []);
+  return [aba, setAba];
+}
+
+function BotaoOcultarValores() {
+  const { ocultar, setOcultar } = useValores();
+  return (
+    <button type="button" className="btn btn-secundario" onClick={() => setOcultar(!ocultar)} aria-pressed={ocultar}>
+      {ocultar ? '👁️ Mostrar valores' : '🙈 Ocultar valores'}
+    </button>
+  );
+}
+
+function Layout({ grupos, abaAtiva, setAbaAtiva, user, role, onLogout, children }) {
+  const [menuAberto, setMenuAberto] = useState(false);
+  const pagina = grupos.flatMap((g) => g.itens).find((i) => i.id === abaAtiva);
+
+  useEffect(() => {
+    document.title = pagina ? `${pagina.nome} · Oule` : 'Oule';
+  }, [pagina]);
+
+  return (
+    <div className="app-container">
+      <header className="barra-mobile">
+        <span className="marca-titulo">OULE</span>
+        <button type="button" className="btn-menu" aria-label="Abrir menu" onClick={() => setMenuAberto(true)}>☰</button>
+      </header>
+      <Sidebar
+        grupos={grupos}
+        abaAtiva={abaAtiva}
+        setAbaAtiva={setAbaAtiva}
+        user={user}
+        role={role}
+        onLogout={onLogout}
+        aberta={menuAberto}
+        onFechar={() => setMenuAberto(false)}
+      />
+      <main className="main-content">
+        <div className="topbar">
+          <div>
+            <h1 className="page-title">{pagina?.icone} {pagina?.nome}</h1>
+            {pagina?.subtitulo && <p className="page-subtitle">{pagina.subtitulo}</p>}
+          </div>
+          {pagina?.dinheiro && (
+            <div className="topbar-actions">
+              <BotaoOcultarValores />
+            </div>
+          )}
+        </div>
+        <Suspense fallback={<Carregando />}>{children}</Suspense>
+      </main>
+    </div>
+  );
+}
+
+function AreaCliente({ user, role, logout, tema, setTema, recarregarPerfil }) {
+  const ids = useMemo(() => PAGINAS_CLIENTE.flatMap((g) => g.itens.map((i) => i.id)), []);
+  const [aba, setAba] = useAbaNaUrl('inicio', ids);
+
+  return (
+    <Layout grupos={PAGINAS_CLIENTE} abaAtiva={aba} setAbaAtiva={setAba} user={user} role={role} onLogout={logout}>
+      {aba === 'inicio' && <DashboardPage onNavegar={setAba} />}
+      {aba === 'transacoes' && <TransacoesPage />}
+      {aba === 'plano' && <PlanoPage />}
+      {aba === 'futuro' && <FuturoPage />}
+      {aba === 'sonhos' && <ObjetivosPage />}
+      {aba === 'pagamentos' && <PagamentosPage />}
+      {aba === 'cartoes' && <CartoesPage />}
+      {aba === 'analises' && <AnalisesPage onNavegar={setAba} />}
+      {aba === 'retrospectiva' && <RetrospectivaPage />}
+      {aba === 'openfinance' && <OpenFinancePage />}
+      {aba === 'importar' && <ImportarExtratoPage />}
+      {aba === 'whatsapp' && <WhatsappBotPage isAdmin={false} />}
+      {aba === 'perfil' && <PerfilPage onAtualizado={recarregarPerfil} />}
+      {aba === 'config' && <ConfiguracoesPage tema={tema} setTema={setTema} />}
+    </Layout>
+  );
+}
+
+function AreaEquipe({ user, role, isAdmin, logout, tema, setTema, recarregarPerfil }) {
+  const grupos = useMemo(() => paginasStaff(isAdmin), [isAdmin]);
+  const ids = useMemo(() => grupos.flatMap((g) => g.itens.map((i) => i.id)), [grupos]);
+  const [aba, setAba] = useAbaNaUrl('visao', ids);
+  const [overview, setOverview] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
+  const [clienteId, setClienteId] = useState(null);
+
+  const carregarOverview = useCallback(async () => {
+    setCarregando(true);
     try {
-      const data = await fetchApi('/admin/overview');
-      setAdminOverview(data);
+      setOverview(await api.get('/admin/overview'));
+      setErro('');
     } catch (err) {
-      console.error('Erro ao buscar visão geral administrativa:', err.message);
+      setErro(err.message);
     } finally {
-      setAdminLoading(false);
+      setCarregando(false);
     }
   }, []);
 
   useEffect(() => {
-    if (isStaff) fetchAdminOverview();
-  }, [isStaff, fetchAdminOverview]);
+    carregarOverview();
+  }, [carregarOverview]);
 
-  const totalEntradas = transacoes.map(getValorAjustado).filter((v) => v > 0).reduce((a, b) => a + b, 0);
-  const totalSaidas = transacoes.map(getValorAjustado).filter((v) => v < 0).reduce((a, b) => a + Math.abs(b), 0);
-  const saldoLiquido = totalEntradas - totalSaidas;
-  const taxaPoupanca = totalEntradas > 0 ? ((totalEntradas - totalSaidas) / totalEntradas) * 100 : 0;
-
-  const gastosPorCategoria = transacoes.reduce((acc, t) => {
-    const valor = getValorAjustado(t);
-    if (valor < 0) {
-      const cat = t.categoria || 'Outros';
-      acc[cat] = (acc[cat] || 0) + Math.abs(valor);
-    }
-    return acc;
-  }, {});
-  const categoriasOrdenadas = Object.entries(gastosPorCategoria).sort((a, b) => b[1] - a[1]);
-
-  const formatCurrency = (val) => {
-    if (esconderValores) return '••••••';
-    const simbolos = { BRL: 'R$', USD: '$', EUR: '€' };
-    const simbolo = simbolos[configs.moeda] || 'R$';
-    return `${simbolo} ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const trocarAba = (nova) => {
+    setClienteId(null);
+    setAba(nova);
   };
 
-  if (carregando) {
-    return <div className="auth-wrapper"><p>Carregando...</p></div>;
-  }
-
-  if (!user) {
-    return <AuthPage onLogin={login} onCadastrar={cadastrar} />;
-  }
-
-  // ---------------------------------------------------------------------
-  // Visão "staff" (oule/admin ou planejador): interface própria,
-  // separada da dos clientes comuns. Vê dados agregados e individuais
-  // dos usuários dentro do seu escopo — o backend já filtra isso por
-  // papel, então o frontend só precisa decidir o que MOSTRAR (ex.: a
-  // aba "Planejadores" só existe para quem é 'oule').
-  // ---------------------------------------------------------------------
-  if (isStaff) {
-    const abrirUsuario = (userId) => {
-      setUsuarioSelecionadoId(userId);
-      setAdminAba('Usuários');
-    };
-
-    return (
-      <div className="app-container">
-        <Sidebar
-          abaAtiva={adminAba}
-          setAbaAtiva={(aba) => { setAdminAba(aba); setUsuarioSelecionadoId(null); }}
-          user={user}
-          onLogout={logout}
-          role={role}
+  return (
+    <Layout grupos={grupos} abaAtiva={aba} setAbaAtiva={trocarAba} user={user} role={role} onLogout={logout}>
+      {aba === 'visao' && (
+        <AdminOverviewPage
+          overview={overview}
+          loading={carregando}
+          erro={erro}
+          onSelecionarUsuario={(id) => {
+            setClienteId(id);
+            setAba('clientes');
+          }}
         />
+      )}
+      {aba === 'clientes' && (
+        <AdminUsuariosPage
+          usuarios={overview?.usuarios || []}
+          usuarioSelecionadoId={clienteId}
+          onSelecionar={setClienteId}
+          onVoltar={() => setClienteId(null)}
+          onAtualizarLista={carregarOverview}
+        />
+      )}
+      {aba === 'analises' && <AdminAnalisesPage />}
+      {aba === 'planejadores' && isAdmin && <AdminPlanejadoresPage />}
+      {aba === 'whatsapp' && isAdmin && <WhatsappBotPage isAdmin />}
+      {aba === 'perfil' && <PerfilPage onAtualizado={recarregarPerfil} />}
+      {aba === 'config' && <ConfiguracoesPage tema={tema} setTema={setTema} ehStaff />}
+    </Layout>
+  );
+}
 
-        <main className="main-content">
-          <div className="topbar">
-            <div>
-              <h1 className="page-title">{adminAba}</h1>
-              <p className="page-subtitle">
-                {isAdmin
-                  ? 'Painel administrativo — dados consolidados de todos os usuários.'
-                  : 'Painel do planejador — dados dos clientes sob sua responsabilidade.'}
-              </p>
-            </div>
-            <div className="topbar-actions">
-              <button className="btn-secondary" onClick={() => setEsconderValores(!esconderValores)}>
-                {esconderValores ? '👁️ Exibir Valores' : '🙈 Ocultar Valores'}
-              </button>
-            </div>
-          </div>
+export default function App() {
+  const { user, role, isAdmin, isStaff, carregando, login, cadastrar, logout, recuperarSenha, recarregarPerfil } = useAuth();
+  const [tema, setTema] = useTema();
 
-          {adminAba === 'Visão Geral' && (
-            <AdminOverviewPage
-              overview={adminOverview}
-              loading={adminLoading}
-              formatCurrency={formatCurrency}
-              onSelecionarUsuario={abrirUsuario}
-            />
-          )}
-
-          {adminAba === 'Usuários' && (
-            <AdminUsuariosPage
-              usuarios={adminOverview?.usuarios || []}
-              usuarioSelecionadoId={usuarioSelecionadoId}
-              onSelecionar={setUsuarioSelecionadoId}
-              onVoltar={() => setUsuarioSelecionadoId(null)}
-              formatCurrency={formatCurrency}
-            />
-          )}
-
-          {/* Só o oule administra o vínculo planejador ↔ cliente. */}
-          {adminAba === 'Planejadores' && isAdmin && <AdminPlanejadoresPage />}
-
-          {/* O admin é quem conecta o número do robô: a aba do WhatsApp
-              mostra o QR Code de pareamento (rota protegida no backend). */}
-          {adminAba === 'WhatsApp Bot' && isAdmin && <WhatsappBotPage isAdmin />}
-
-          {adminAba === 'Configurações' && (
-            <ConfiguracoesPage configs={configs} setConfigs={setConfigs} transacoes={[]} />
-          )}
-        </main>
-      </div>
-    );
+  let conteudo;
+  if (carregando) {
+    conteudo = <div className="auth-wrapper"><Carregando texto="Carregando..." /></div>;
+  } else if (!user) {
+    conteudo = <AuthPage onLogin={login} onCadastrar={cadastrar} onRecuperarSenha={recuperarSenha} />;
+  } else if (isStaff) {
+    conteudo = <AreaEquipe user={user} role={role} isAdmin={isAdmin} logout={logout} tema={tema} setTema={setTema} recarregarPerfil={recarregarPerfil} />;
+  } else {
+    conteudo = <AreaCliente user={user} role={role} logout={logout} tema={tema} setTema={setTema} recarregarPerfil={recarregarPerfil} />;
   }
 
   return (
-    <div className="app-container">
-      <Sidebar abaAtiva={abaAtiva} setAbaAtiva={setAbaAtiva} user={user} onLogout={logout} role={role} />
-
-      <main className="main-content">
-        <div className="topbar">
-          <div>
-            <h1 className="page-title">{abaAtiva}</h1>
-            <p className="page-subtitle">Acompanhe seus fluxos, despesas e conexões em tempo real.</p>
-          </div>
-          <div className="topbar-actions">
-            <button className="btn-secondary" onClick={() => setEsconderValores(!esconderValores)}>
-              {esconderValores ? '👁️ Exibir Valores' : '🙈 Ocultar Valores'}
-            </button>
-          </div>
-        </div>
-
-        {/* Saldo líquido / entradas / saídas só fazem sentido junto do
-            extrato — nas telas de Open Finance, WhatsApp Bot e
-            Configurações elas só ocupavam espaço sem contexto. */}
-        {(abaAtiva === 'Dashboard' || abaAtiva === 'Transações') && (
-          <div className="metrics-grid">
-            <MetricCard label="SALDO LÍQUIDO" icon="💰" value={formatCurrency(saldoLiquido)} color={saldoLiquido >= 0 ? '#10b981' : '#ef4444'} />
-            <MetricCard label="TOTAL ENTRADAS" icon="📥" value={formatCurrency(totalEntradas)} color="#10b981" />
-            <MetricCard label="TOTAL SAÍDAS" icon="📤" value={formatCurrency(totalSaidas)} color="#ef4444" />
-          </div>
-        )}
-
-        {abaAtiva === 'Dashboard' && (
-          <DashboardPage
-            transacoes={transacoes}
-            categoriasOrdenadas={categoriasOrdenadas}
-            totalSaidas={totalSaidas}
-            taxaPoupanca={taxaPoupanca}
-            formatCurrency={formatCurrency}
-            getValorAjustado={getValorAjustado}
-          />
-        )}
-
-        {abaAtiva === 'Objetivos' && (
-          <ObjetivosPage formatCurrency={formatCurrency} editavel />
-        )}
-
-        {abaAtiva === 'Transações' && (
-          <TransacoesPage
-            transacoes={transacoes}
-            loading={loading}
-            busca={busca}
-            setBusca={setBusca}
-            filtroCategoria={filtroCategoria}
-            setFiltroCategoria={setFiltroCategoria}
-            onAtualizar={fetchTransacoes}
-            formatCurrency={formatCurrency}
-            getValorAjustado={getValorAjustado}
-            userId={user.id}
-          />
-        )}
-
-        {abaAtiva === 'OpenFinance' && <OpenFinancePage onSincronizado={fetchTransacoes} />}
-
-        {abaAtiva === 'ImportarExtrato' && <ImportarExtratoPage onImportado={fetchTransacoes} />}
-
-        {abaAtiva === 'WhatsApp Bot' && <WhatsappBotPage isAdmin={false} />}
-
-        {abaAtiva === 'Configurações' && (
-          <ConfiguracoesPage configs={configs} setConfigs={setConfigs} transacoes={transacoes} />
-        )}
-      </main>
-    </div>
+    <ToastProvider>
+      <ValoresProvider>{conteudo}</ValoresProvider>
+    </ToastProvider>
   );
 }

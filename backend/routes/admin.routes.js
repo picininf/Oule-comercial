@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { requireAuth, attachProfile, requireStaff } from '../middleware/auth.js';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
-import { getValorAjustado } from '../utils/financeUtils.js';
+import { getValorAjustado, ehTransferencia } from '../utils/financeUtils.js';
+import { exigirUuid } from '../utils/http.js';
+import { faixaEtaria } from '../utils/perfil.js';
 import { idsVisiveisPara } from '../utils/acesso.js';
 
 const router = Router();
@@ -30,9 +32,16 @@ async function listarTodosUsuariosComPerfil() {
     page += 1;
   }
 
-  const { data: perfis, error: erroPerfis } = await supabaseAdmin
+  // Colunas da v4 (código, UF, nascimento, tags). Se a migração ainda não
+  // foi rodada, cai para as colunas básicas sem derrubar o painel.
+  let { data: perfis, error: erroPerfis } = await supabaseAdmin
     .from('profiles')
-    .select('id, nome, telefone, banco_conectado, role, planejador_id');
+    .select('id, nome, telefone, banco_conectado, role, planejador_id, codigo_cliente, estado, data_nascimento, forma_trabalho, tags');
+  if (erroPerfis) {
+    ({ data: perfis, error: erroPerfis } = await supabaseAdmin
+      .from('profiles')
+      .select('id, nome, telefone, banco_conectado, role, planejador_id'));
+  }
   if (erroPerfis) throw erroPerfis;
 
   const perfilPorId = new Map((perfis || []).map((p) => [p.id, p]));
@@ -41,6 +50,21 @@ async function listarTodosUsuariosComPerfil() {
     authUser: u,
     perfil: perfilPorId.get(u.id) || null,
   }));
+}
+
+async function buscarTransacoesDosUsuarios(ids) {
+  const linhas = [];
+  const colunas = 'user_id, valor, categoria, descricao, origem, open_finance_id, data_transacao, data_competencia';
+  for (let i = 0; i < ids.length; i += 100) {
+    const lote = ids.slice(i, i + 100);
+    for (let inicio = 0; inicio < 100000; inicio += 1000) {
+      const { data, error } = await supabaseAdmin.from('transacoes').select(colunas).in('user_id', lote).range(inicio, inicio + 999);
+      if (error) throw error;
+      linhas.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+  }
+  return linhas;
 }
 
 function perfilResumido({ authUser, perfil }) {
@@ -52,6 +76,11 @@ function perfilResumido({ authUser, perfil }) {
     bancoConectado: perfil?.banco_conectado || authUser.user_metadata?.banco_conectado || '',
     role: perfil?.role || 'cliente',
     planejadorId: perfil?.planejador_id || null,
+    codigoCliente: perfil?.codigo_cliente || null,
+    estado: perfil?.estado || null,
+    faixaEtaria: faixaEtaria(perfil?.data_nascimento)?.nome || null,
+    formaTrabalho: perfil?.forma_trabalho || null,
+    tags: perfil?.tags || [],
     criadoEm: authUser.created_at,
     ultimoLogin: authUser.last_sign_in_at || null,
   };
@@ -76,11 +105,7 @@ router.get('/overview', async (req, res, next) => {
   try {
     const idsPermitidos = await idsVisiveisPara(req); // null = todos (oule)
 
-    const [todos, { data: transacoesTodas, error }] = await Promise.all([
-      listarTodosUsuariosComPerfil(),
-      supabaseAdmin.from('transacoes').select('*'),
-    ]);
-    if (error) throw error;
+    const todos = await listarTodosUsuariosComPerfil();
 
     // Só entram no painel usuários com papel 'cliente' (staff não
     // aparece nesse ranking financeiro) e dentro do escopo de quem
@@ -96,8 +121,10 @@ router.get('/overview', async (req, res, next) => {
       usuariosFiltrados.map((u) => [u.authUser.id, { ...perfilResumido(u), totalEntradas: 0, totalSaidas: 0, totalTransacoes: 0, ultimaTransacao: null }])
     );
 
-    const idsSet = new Set(porUsuario.keys());
-    const transacoes = (transacoesTodas || []).filter((t) => idsSet.has(t.user_id));
+    // Busca só as transações dos clientes visíveis (antes vinha a tabela
+    // inteira para depois filtrar em memória) e ignora transferências
+    // entre contas próprias, que não são renda nem gasto.
+    const transacoes = (await buscarTransacoesDosUsuarios([...porUsuario.keys()])).filter((t) => !ehTransferencia(t));
 
     const categoriasConsolidadas = {};
     let totalEntradas = 0;
@@ -136,8 +163,9 @@ router.get('/overview', async (req, res, next) => {
 
     const evolucaoPorMes = {};
     for (const t of transacoes) {
-      if (!t.data_transacao) continue;
-      const mes = String(t.data_transacao).slice(0, 7);
+      const data = t.data_competencia || t.data_transacao;
+      if (!data) continue;
+      const mes = String(data).slice(0, 7);
       const valor = getValorAjustado(t);
       if (!evolucaoPorMes[mes]) evolucaoPorMes[mes] = { mes, entradas: 0, saidas: 0 };
       if (valor > 0) evolucaoPorMes[mes].entradas += valor;
@@ -169,7 +197,7 @@ router.get('/overview', async (req, res, next) => {
  * Visão individual e detalhada de um usuário específico — só permitida
  * se ele estiver no escopo de quem está pedindo (ver `idsVisiveisPara`).
  */
-router.get('/usuarios/:userId', async (req, res, next) => {
+router.get('/usuarios/:userId', exigirUuid('userId'), async (req, res, next) => {
   try {
     const { userId } = req.params;
 
@@ -183,11 +211,18 @@ router.get('/usuarios/:userId', async (req, res, next) => {
       return res.status(404).json({ error: 'Usuário não encontrado.' });
     }
 
-    const { data: perfil } = await supabaseAdmin
+    let { data: perfil, error: erroPerfil } = await supabaseAdmin
       .from('profiles')
-      .select('id, nome, telefone, banco_conectado, role, planejador_id')
+      .select('id, nome, telefone, banco_conectado, role, planejador_id, codigo_cliente, estado, data_nascimento, forma_trabalho, tags')
       .eq('id', userId)
       .maybeSingle();
+    if (erroPerfil) {
+      ({ data: perfil } = await supabaseAdmin
+        .from('profiles')
+        .select('id, nome, telefone, banco_conectado, role, planejador_id')
+        .eq('id', userId)
+        .maybeSingle());
+    }
 
     const { data: transacoes, error } = await supabaseAdmin
       .from('transacoes')
@@ -201,6 +236,7 @@ router.get('/usuarios/:userId', async (req, res, next) => {
     const categoriasMap = {};
 
     for (const t of transacoes || []) {
+      if (ehTransferencia(t)) continue;
       const valor = getValorAjustado(t);
       if (valor > 0) {
         totalEntradas += valor;

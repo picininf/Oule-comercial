@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizarCategoria } from '../utils/categorias.js';
 
 /**
  * Schema de cada lançamento que a IA (Gemini) extrai de um extrato
@@ -19,7 +20,7 @@ export const extratoTransacaoSchema = z.object({
     .optional()
     .transform((v) => v || 'Outros')
     .default('Outros'),
-});
+}).transform((t) => ({ ...t, categoriaOriginal: t.categoria, categoria: normalizarCategoria(t.categoria, t.descricao, t.valor) }));
 
 export const extratoRespostaSchema = z.object({
   transacoes: z.array(extratoTransacaoSchema).max(600),
@@ -29,6 +30,9 @@ export const extratoRespostaSchema = z.object({
 // pelo multer; aqui só validamos os campos de texto que acompanham).
 export const extratoImportarBodySchema = z.object({
   userId: z.string().uuid().optional(),
+  // Cartão ao qual o extrato pertence (fatura): ativa o cálculo de
+  // competência x caixa para cada lançamento.
+  cartaoId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)),
 });
 
 // Body de PUT /api/extrato/config
@@ -37,13 +41,4 @@ export const extratoConfigSchema = z.object({
   diaImportacao: z.coerce.number().int().min(1, 'Escolha um dia entre 1 e 31.').max(31, 'Escolha um dia entre 1 e 31.').nullable(),
 });
 
-export function validarBody(schema) {
-  return (req, res, next) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Dados inválidos.', detalhes: result.error.flatten() });
-    }
-    req.body = result.data;
-    next();
-  };
-}
+export { validarBody } from './validate.js';

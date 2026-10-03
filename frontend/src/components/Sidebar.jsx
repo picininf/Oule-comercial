@@ -6,82 +6,60 @@ const ROTULO_PAPEL = {
   cliente: 'FINANCIAL',
 };
 
-export default function Sidebar({ abaAtiva, setAbaAtiva, user, onLogout, role = 'cliente' }) {
-  const itensCliente = [
-    { id: 'Dashboard', label: '📊 Visão Geral' },
-    { id: 'Transações', label: '💳 Transações & Extrato' },
-    { id: 'Objetivos', label: '🎯 Sonhos & Metas' },
-    { id: 'OpenFinance', label: '🏦 Open Finance' },
-    { id: 'ImportarExtrato', label: '📄 Importar Extrato' },
-    { id: 'WhatsApp Bot', label: '📲 WhatsApp Bot IA' },
-    { id: 'Configurações', label: '⚙️ Configurações' },
-  ];
-
-  // Planejador enxerga uma versão do painel administrativo, mas
-  // restrita aos próprios clientes (o backend garante isso). Não vê a
-  // gestão de planejadores nem o WhatsApp Bot (número compartilhado,
-  // gerido só pelo oule).
-  const itensPlanejador = [
-    { id: 'Visão Geral', label: '📊 Meus Clientes (Visão Geral)' },
-    { id: 'Usuários', label: '👥 Meus Clientes' },
-    { id: 'Configurações', label: '⚙️ Configurações' },
-  ];
-
-  const itensOule = [
-    { id: 'Visão Geral', label: '📊 Visão Geral (Todos)' },
-    { id: 'Usuários', label: '👥 Usuários' },
-    { id: 'Planejadores', label: '🧭 Planejadores' },
-    { id: 'WhatsApp Bot', label: '📲 WhatsApp Bot IA' },
-    { id: 'Configurações', label: '⚙️ Configurações' },
-  ];
-
-  const itens = role === 'oule' ? itensOule : role === 'planejador' ? itensPlanejador : itensCliente;
-  const isStaff = role === 'oule' || role === 'planejador';
+/**
+ * Menu lateral agrupado por seção. No celular vira uma gaveta (abre pelo
+ * botão ☰ da barra superior) em vez de uma faixa com 13 abas espremidas.
+ */
+export default function Sidebar({ grupos, abaAtiva, setAbaAtiva, user, onLogout, role = 'cliente', aberta, onFechar }) {
+  const descricaoPapel =
+    role === 'oule' ? 'Administrador' : role === 'planejador' ? 'Planejador financeiro' : user.codigoCliente || user.bancoConectado || 'Cliente';
 
   return (
-    <aside className="sidebar">
-      <div>
-        <div className="brand-container">
-          <div className="brand-logo-box">
-            <span className="brand-title">OULE</span>
-            <span className="brand-tag">{ROTULO_PAPEL[role] || 'FINANCIAL'}</span>
+    <>
+      {aberta && <div className="sidebar-fundo" onClick={onFechar} aria-hidden="true" />}
+      <aside className={`sidebar ${aberta ? 'aberta' : ''}`} aria-label="Menu principal">
+        <div className="marca">
+          <div className="marca-logo">
+            <span className="marca-titulo">OULE</span>
+            <span className="marca-tag">{ROTULO_PAPEL[role] || 'FINANCIAL'}</span>
           </div>
+          <button type="button" className="menu-fechar" aria-label="Fechar menu" onClick={onFechar}>✕</button>
         </div>
 
-        <nav className="nav-menu" aria-label="Navegação principal">
-          {itens.map((item) => (
-            <div
-              key={item.id}
-              role="button"
-              tabIndex={0}
-              aria-current={abaAtiva === item.id ? 'page' : undefined}
-              className={`nav-item ${abaAtiva === item.id ? 'active' : ''}`}
-              onClick={() => setAbaAtiva(item.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setAbaAtiva(item.id);
-                }
-              }}
-            >
-              {item.label}
-            </div>
+        <nav className="nav-menu">
+          {grupos.map((g) => (
+            <React.Fragment key={g.grupo}>
+              <div className="nav-grupo">{g.grupo}</div>
+              {g.itens.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-current={abaAtiva === item.id ? 'page' : undefined}
+                  className={`nav-item ${abaAtiva === item.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setAbaAtiva(item.id);
+                    onFechar?.();
+                  }}
+                >
+                  <span className="nav-icone" aria-hidden="true">{item.icone}</span>
+                  {item.nome}
+                </button>
+              ))}
+            </React.Fragment>
           ))}
         </nav>
-      </div>
 
-      <div className="sidebar-footer">
-        <div className="user-profile-card">
-          <div className="avatar">{user.nome ? user.nome[0].toUpperCase() : '👤'}</div>
-          <div className="user-info">
-            <span className="user-name">{user.nome || user.email}</span>
-            <span className="user-email">
-              {role === 'oule' ? 'Administrador' : role === 'planejador' ? 'Planejador Financeiro' : (user.bancoConectado || 'Conta Principal')}
-            </span>
+        <div className="sidebar-footer">
+          <div className="user-profile-card">
+            <div className="avatar" aria-hidden="true">{(user.nome || user.email || '?')[0].toUpperCase()}</div>
+            <div className="user-info">
+              <span className="user-name">{user.nome || user.email}</span>
+              <span className="user-email">{descricaoPapel}</span>
+            </div>
           </div>
+          <button type="button" onClick={onLogout} className="btn-logout">🚪 Sair da conta</button>
         </div>
-        <button onClick={onLogout} className="btn-logout">🚪 Sair da Conta</button>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

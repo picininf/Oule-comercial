@@ -1,437 +1,369 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { fetchApi } from '../lib/api';
+import React, { useMemo, useState } from 'react';
+import { Card, Modal, Campo, Alerta, Vazio, Carregando, Barra, useValores, useToast, useConfirmacao } from '../components/ui';
+import MenuExportar from '../components/MenuExportar';
+import { useApi } from '../hooks/useApi';
+import { api } from '../lib/api';
+import { formatarData, formatarMoeda, qs } from '../lib/format';
 
-const CATEGORIAS = [
+const CATEGORIAS_SONHO = [
   { id: 'Financeira', icone: '💰' },
+  { id: 'Reserva de emergência', icone: '🛟' },
   { id: 'Viagem', icone: '✈️' },
   { id: 'Casa', icone: '🏠' },
-  { id: 'Produto', icone: '📦' },
+  { id: 'Carro', icone: '🚗' },
   { id: 'Eletrônicos', icone: '💻' },
   { id: 'Educação', icone: '🎓' },
   { id: 'Saúde', icone: '🩺' },
+  { id: 'Casamento', icone: '💍' },
   { id: 'Outro', icone: '🌟' },
 ];
+const ICONE = Object.fromEntries(CATEGORIAS_SONHO.map((c) => [c.id, c.icone]));
 
-const ICONE_POR_CATEGORIA = CATEGORIAS.reduce((acc, c) => ({ ...acc, [c.id]: c.icone }), {});
+const FORM_VAZIO = { titulo: '', tipo: 'dinheiro', categoria: 'Financeira', descricao: '', valorAlvo: '', valorAtual: '', prazo: '' };
 
-const ESTADO_INICIAL_FORM = {
-  titulo: '',
-  tipo: 'dinheiro',
-  categoria: 'Financeira',
-  descricao: '',
-  valorAlvo: '',
-  valorAtual: '',
-  prazo: '',
-};
+function mesesAte(prazo) {
+  if (!prazo) return null;
+  const hoje = new Date();
+  const [a, m] = prazo.split('-').map(Number);
+  return Math.max((a - hoje.getFullYear()) * 12 + (m - 1 - hoje.getMonth()), 0);
+}
 
 /**
- * @param {string|null} userId - se null, opera sobre o próprio usuário
- *   logado (fluxo cliente). Se informado, staff (planejador/oule)
- *   vendo/editando os sonhos de um cliente específico.
- * @param {boolean} editavel - permite criar/editar/excluir metas.
+ * Sonhos & Metas. `userId` = staff (planejador/oule) gerenciando os
+ * sonhos de um cliente.
  */
-export default function ObjetivosPage({ userId = null, editavel = true, formatCurrency }) {
-  const [objetivos, setObjetivos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState('');
-  const [modalAberto, setModalAberto] = useState(false);
-  const [editandoId, setEditandoId] = useState(null);
-  const [form, setForm] = useState(ESTADO_INICIAL_FORM);
-  const [salvando, setSalvando] = useState(false);
+export default function ObjetivosPage({ userId = null, editavel = true }) {
+  const { fmt } = useValores();
+  const toast = useToast();
+  const [confirmar, modalConfirmacao] = useConfirmacao();
+  const { dados, carregando, erro, recarregar } = useApi(`/objetivos${qs({ userId })}`);
+  const [editando, setEditando] = useState(null); // null | 'novo' | objetivo
+  const [aportando, setAportando] = useState(null);
 
-  // Categorias disponíveis no seletor: começa com as pré-definidas e
-  // ganha novas conforme a pessoa cadastra ("+ Nova categoria") ou
-  // conforme metas antigas trazem categorias que não estão na lista
-  // fixa (ex.: importadas de outro lugar).
-  const [categoriasDisponiveis, setCategoriasDisponiveis] = useState(CATEGORIAS);
-  const [novaCategoriaAberta, setNovaCategoriaAberta] = useState(false);
-  const [novaCategoriaTexto, setNovaCategoriaTexto] = useState('');
+  const objetivos = dados || [];
+  const grupos = [
+    { id: 'em_andamento', titulo: 'Em andamento' },
+    { id: 'concluido', titulo: 'Realizados 🎉' },
+    { id: 'cancelado', titulo: 'Cancelados' },
+  ];
+  const totais = useMemo(() => {
+    const ativos = objetivos.filter((o) => o.status === 'em_andamento');
+    return {
+      alvo: ativos.reduce((s, o) => s + o.valorAlvo, 0),
+      guardado: ativos.reduce((s, o) => s + o.valorAtual, 0),
+      porMes: ativos.reduce((s, o) => {
+        const meses = mesesAte(o.prazo);
+        return meses ? s + Math.max(o.valorAlvo - o.valorAtual, 0) / meses : s;
+      }, 0),
+    };
+  }, [objetivos]);
 
-  const endpoint = userId ? `/objetivos?userId=${userId}` : '/objetivos';
-
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    setErro('');
+  const alterarStatus = async (obj, status) => {
     try {
-      const data = await fetchApi(endpoint);
-      const lista = Array.isArray(data) ? data : [];
-      setObjetivos(lista);
-
-      // Se alguma meta já salva usa uma categoria que não está na lista
-      // atual (ex.: categoria personalizada cadastrada antes, ou vinda
-      // de outra origem), garante que ela apareça no seletor também —
-      // senão a pessoa não consegue nem ver qual categoria está
-      // selecionada ao editar.
-      setCategoriasDisponiveis((atual) => {
-        const idsConhecidos = new Set(atual.map((c) => c.id));
-        const novas = [];
-        for (const obj of lista) {
-          if (obj.categoria && !idsConhecidos.has(obj.categoria)) {
-            idsConhecidos.add(obj.categoria);
-            novas.push({ id: obj.categoria, icone: '🏷️' });
-          }
-        }
-        return novas.length > 0 ? [...atual, ...novas] : atual;
-      });
+      await api.put(`/objetivos/${obj.id}`, { status });
+      toast(status === 'concluido' ? `Parabéns! “${obj.titulo}” realizado 🎉` : 'Sonho atualizado.');
+      recarregar();
     } catch (err) {
-      setErro(err.message || 'Erro ao carregar metas.');
-    } finally {
-      setLoading(false);
+      toast(err.message, 'erro');
     }
-  }, [endpoint]);
-
-  useEffect(() => { carregar(); }, [carregar]);
-
-  const abrirNovo = () => {
-    setEditandoId(null);
-    setForm(ESTADO_INICIAL_FORM);
-    setNovaCategoriaAberta(false);
-    setNovaCategoriaTexto('');
-    setModalAberto(true);
   };
 
-  const abrirEdicao = (obj) => {
-    setEditandoId(obj.id);
-    setForm({
-      titulo: obj.titulo,
-      tipo: obj.tipo,
-      categoria: obj.categoria || 'Outro',
-      descricao: obj.descricao || '',
-      valorAlvo: String(obj.valorAlvo),
-      valorAtual: String(obj.valorAtual),
-      prazo: obj.prazo || '',
-    });
-    setNovaCategoriaAberta(false);
-    setNovaCategoriaTexto('');
-    setModalAberto(true);
+  const excluir = async (obj) => {
+    const ok = await confirmar({ titulo: 'Excluir sonho', texto: `Excluir “${obj.titulo}”? Essa ação não pode ser desfeita.`, confirmar: 'Excluir', perigo: true });
+    if (!ok) return;
+    try {
+      await api.delete(`/objetivos/${obj.id}`);
+      toast('Sonho excluído.');
+      recarregar();
+    } catch (err) {
+      toast(err.message, 'erro');
+    }
   };
 
-  /**
-   * Confirma a criação de uma categoria personalizada digitada pela
-   * pessoa: adiciona na lista de chips (sem duplicar, sem vazio) e já
-   * seleciona ela na meta que está sendo criada/editada. Antes disto
-   * não existia nenhuma forma de sair das 8 categorias fixas — clicar
-   * em "+ Nova categoria" não fazia nada.
-   */
-  const confirmarNovaCategoria = () => {
-    const nome = novaCategoriaTexto.trim();
-    if (!nome) {
-      setNovaCategoriaAberta(false);
-      return;
-    }
-    const jaExiste = categoriasDisponiveis.some((c) => c.id.toLowerCase() === nome.toLowerCase());
-    if (!jaExiste) {
-      setCategoriasDisponiveis((atual) => [...atual, { id: nome, icone: '🏷️' }]);
-    }
-    setForm((f) => ({ ...f, categoria: jaExiste ? categoriasDisponiveis.find((c) => c.id.toLowerCase() === nome.toLowerCase()).id : nome }));
-    setNovaCategoriaTexto('');
-    setNovaCategoriaAberta(false);
+  const dadosExportacao = () => ({
+    resumo: [
+      { rotulo: 'Total dos sonhos ativos', valor: formatarMoeda(totais.alvo) },
+      { rotulo: 'Já guardado', valor: formatarMoeda(totais.guardado) },
+      { rotulo: 'Necessário por mês', valor: formatarMoeda(totais.porMes) },
+    ],
+    colunas: [
+      { titulo: 'Sonho', largura: 30, chave: 'titulo' },
+      { titulo: 'Categoria', chave: 'categoria' },
+      { titulo: 'Valor alvo', tipo: 'moeda', chave: 'valorAlvo' },
+      { titulo: 'Guardado', tipo: 'moeda', chave: 'valorAtual' },
+      { titulo: 'Progresso', valor: (o) => `${o.progresso.toFixed(0)}%` },
+      { titulo: 'Prazo', tipo: 'data', chave: 'prazo' },
+      { titulo: 'Situação', valor: (o) => ({ em_andamento: 'Em andamento', concluido: 'Realizado', cancelado: 'Cancelado' })[o.status] },
+    ],
+    linhas: objetivos,
+  });
+
+  return (
+    <div className="pilha">
+      {modalConfirmacao}
+      <Card
+        titulo="Sonhos & Metas"
+        icone="🎯"
+        acoes={
+          <>
+            <MenuExportar nome="sonhos" titulo="Sonhos e metas" dados={dadosExportacao} formatos={['csv', 'xlsx', 'pdf']} />
+            {editavel && <button type="button" className="btn btn-primario" onClick={() => setEditando('novo')}>+ Novo sonho</button>}
+          </>
+        }
+      >
+        {objetivos.some((o) => o.status === 'em_andamento') && (
+          <p className="texto-suave">
+            Sonhos ativos somam <strong>{fmt(totais.alvo)}</strong>, com <strong>{fmt(totais.guardado)}</strong> já guardados.
+            {totais.porMes > 0 && <> Para cumprir os prazos, é preciso guardar cerca de <strong>{fmt(totais.porMes)}</strong> por mês — veja em “Futuro” se isso cabe no seu ritmo.</>}
+          </p>
+        )}
+      </Card>
+
+      <Alerta>{erro}</Alerta>
+      {carregando && !dados ? <Carregando texto="Carregando sonhos..." /> : objetivos.length === 0 ? (
+        <Card>
+          <Vazio
+            icone="🌟"
+            titulo="Nenhum sonho cadastrado ainda"
+            texto="Viagem, casa própria, reserva de emergência... Cadastre o primeiro e acompanhe quanto falta e quando ele chega."
+            acao={editavel && <button type="button" className="btn btn-primario" onClick={() => setEditando('novo')}>Cadastrar meu primeiro sonho</button>}
+          />
+        </Card>
+      ) : (
+        grupos.map((g) => {
+          const lista = objetivos.filter((o) => o.status === g.id);
+          if (lista.length === 0) return null;
+          return (
+            <section key={g.id}>
+              <h4 className="secao-titulo">{g.titulo} ({lista.length})</h4>
+              <div className="objetivos-grid">
+                {lista.map((obj) => {
+                  const meses = mesesAte(obj.prazo);
+                  const falta = Math.max(obj.valorAlvo - obj.valorAtual, 0);
+                  return (
+                    <article key={obj.id} className="objetivo-card">
+                      <div className="objetivo-card-topo">
+                        <span className="objetivo-icone" aria-hidden="true">{ICONE[obj.categoria] || '🏷️'}</span>
+                        <span className="tag-categoria">{obj.categoria}</span>
+                      </div>
+                      <h4 className="objetivo-titulo">{obj.titulo}</h4>
+                      {obj.descricao && <p className="objetivo-descricao">{obj.descricao}</p>}
+                      <div className="objetivo-valores">
+                        <span>{fmt(obj.valorAtual)}</span>
+                        <span className="objetivo-valor-alvo">de {fmt(obj.valorAlvo)}</span>
+                      </div>
+                      <Barra pct={obj.progresso} cor={obj.progresso >= 100 ? 'var(--sucesso)' : undefined} />
+                      <div className="objetivo-rodape">
+                        <span>{obj.progresso.toFixed(0)}% concluído</span>
+                        {obj.prazo && <span>🗓️ {formatarData(obj.prazo)}</span>}
+                      </div>
+                      {obj.status === 'em_andamento' && falta > 0 && meses !== null && (
+                        <p className="texto-pequeno texto-suave">
+                          {meses > 0 ? <>Guardar <strong>{fmt(falta / meses)}</strong>/mês por {meses} {meses === 1 ? 'mês' : 'meses'}.</> : <span className="negativo">Prazo chegou — faltam {fmt(falta)}.</span>}
+                        </p>
+                      )}
+                      {editavel && (
+                        <div className="objetivo-acoes">
+                          {obj.status === 'em_andamento' && <button type="button" className="btn btn-primario btn-pequeno" onClick={() => setAportando(obj)}>💰 Guardar</button>}
+                          <button type="button" className="btn btn-secundario btn-pequeno" onClick={() => setEditando(obj)}>✏️ Editar</button>
+                          {obj.status === 'em_andamento' && <button type="button" className="btn btn-secundario btn-pequeno" onClick={() => alterarStatus(obj, 'concluido')}>✅ Realizado</button>}
+                          {obj.status !== 'em_andamento' && <button type="button" className="btn btn-secundario btn-pequeno" onClick={() => alterarStatus(obj, 'em_andamento')}>↩️ Reabrir</button>}
+                          {obj.status === 'em_andamento' && <button type="button" className="btn btn-perigo-contorno btn-pequeno" onClick={() => alterarStatus(obj, 'cancelado')}>Cancelar</button>}
+                          <button type="button" className="btn btn-fantasma btn-icone" aria-label="Excluir" title="Excluir" onClick={() => excluir(obj)}>🗑️</button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })
+      )}
+
+      {editando && (
+        <SonhoModal
+          objetivo={editando === 'novo' ? null : editando}
+          userId={userId}
+          categoriasExtras={objetivos.map((o) => o.categoria)}
+          onFechar={() => setEditando(null)}
+          onSalvo={recarregar}
+        />
+      )}
+      {aportando && <AporteModal objetivo={aportando} onFechar={() => setAportando(null)} onSalvo={recarregar} />}
+    </div>
+  );
+}
+
+function SonhoModal({ objetivo, userId, categoriasExtras, onFechar, onSalvo }) {
+  const toast = useToast();
+  const [form, setForm] = useState(
+    objetivo
+      ? {
+          titulo: objetivo.titulo,
+          tipo: objetivo.tipo,
+          categoria: objetivo.categoria || 'Outro',
+          descricao: objetivo.descricao || '',
+          valorAlvo: String(objetivo.valorAlvo),
+          valorAtual: String(objetivo.valorAtual),
+          prazo: objetivo.prazo || '',
+        }
+      : FORM_VAZIO
+  );
+  const [novaCategoria, setNovaCategoria] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState('');
+  const set = (c) => (e) => setForm((f) => ({ ...f, [c]: e.target.value }));
+
+  const categorias = useMemo(() => {
+    const ids = new Set(CATEGORIAS_SONHO.map((c) => c.id));
+    const extras = [...new Set([...categoriasExtras, form.categoria])].filter((c) => c && !ids.has(c)).map((id) => ({ id, icone: '🏷️' }));
+    return [...CATEGORIAS_SONHO, ...extras];
+  }, [categoriasExtras, form.categoria]);
+
+  const adicionarCategoria = () => {
+    const nome = novaCategoria.trim().slice(0, 60);
+    if (nome) setForm((f) => ({ ...f, categoria: nome }));
+    setNovaCategoria('');
   };
 
   const salvar = async (e) => {
     e.preventDefault();
     setSalvando(true);
     setErro('');
+    const payload = {
+      titulo: form.titulo,
+      tipo: form.tipo,
+      categoria: form.categoria,
+      descricao: form.descricao || null,
+      valorAlvo: Number(form.valorAlvo) || 0,
+      valorAtual: Number(form.valorAtual) || 0,
+      prazo: form.prazo || null,
+    };
     try {
-      const payload = {
-        titulo: form.titulo,
-        tipo: form.tipo,
-        categoria: form.categoria,
-        descricao: form.descricao || null,
-        valorAlvo: Number(form.valorAlvo) || 0,
-        valorAtual: Number(form.valorAtual) || 0,
-        prazo: form.prazo || null,
-        ...(userId && !editandoId ? { userId } : {}),
-      };
-
-      if (editandoId) {
-        await fetchApi(`/objetivos/${editandoId}`, { method: 'PUT', body: JSON.stringify(payload) });
-      } else {
-        await fetchApi('/objetivos', { method: 'POST', body: JSON.stringify(payload) });
-      }
-      setModalAberto(false);
-      await carregar();
+      if (objetivo) await api.put(`/objetivos/${objetivo.id}`, payload);
+      else await api.post('/objetivos', { ...payload, ...(userId ? { userId } : {}) });
+      toast(objetivo ? 'Sonho atualizado.' : 'Sonho cadastrado!');
+      onSalvo();
+      onFechar();
     } catch (err) {
-      setErro(err.message || 'Erro ao salvar meta.');
+      setErro(err.message);
     } finally {
       setSalvando(false);
     }
   };
 
-  const alterarStatus = async (obj, status) => {
-    try {
-      await fetchApi(`/objetivos/${obj.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
-      await carregar();
-    } catch (err) {
-      setErro(err.message || 'Erro ao atualizar status.');
-    }
-  };
-
-  const excluir = async (obj) => {
-    if (!window.confirm(`Excluir a meta "${obj.titulo}"? Essa ação não pode ser desfeita.`)) return;
-    try {
-      await fetchApi(`/objetivos/${obj.id}`, { method: 'DELETE' });
-      await carregar();
-    } catch (err) {
-      setErro(err.message || 'Erro ao excluir meta.');
-    }
-  };
-
-  const emAndamento = objetivos.filter((o) => o.status === 'em_andamento');
-  const concluidas = objetivos.filter((o) => o.status === 'concluido');
-  const canceladas = objetivos.filter((o) => o.status === 'cancelado');
-
   return (
-    <div>
-      {erro && <div className="auth-alert error" style={{ marginBottom: '16px' }}>{erro}</div>}
-
-      <div className="card-header-flex" style={{ marginBottom: '16px' }}>
-        <h3>🎯 Objetivos e Sonhos</h3>
-        {editavel && (
-          <button type="button" className="btn-primary" onClick={abrirNovo}>
-            + Nova Meta
-          </button>
-        )}
-      </div>
-
-      {loading ? (
-        <div className="empty-state-box"><p>Carregando metas...</p></div>
-      ) : objetivos.length === 0 ? (
-        <div className="empty-state-box">
-          <p>Nenhuma meta cadastrada ainda. {editavel && 'Que tal adicionar o primeiro sonho?'}</p>
-        </div>
-      ) : (
+    <Modal
+      titulo={objetivo ? 'Editar sonho' : 'Novo sonho ou meta'}
+      largura="lg"
+      onFechar={onFechar}
+      rodape={
         <>
-          <SecaoObjetivos
-            titulo="Em andamento"
-            lista={emAndamento}
-            formatCurrency={formatCurrency}
-            editavel={editavel}
-            onEditar={abrirEdicao}
-            onExcluir={excluir}
-            onAlterarStatus={alterarStatus}
-          />
-          {concluidas.length > 0 && (
-            <SecaoObjetivos
-              titulo="Concluídas 🎉"
-              lista={concluidas}
-              formatCurrency={formatCurrency}
-              editavel={editavel}
-              onEditar={abrirEdicao}
-              onExcluir={excluir}
-              onAlterarStatus={alterarStatus}
-            />
-          )}
-          {canceladas.length > 0 && (
-            <SecaoObjetivos
-              titulo="Canceladas"
-              lista={canceladas}
-              formatCurrency={formatCurrency}
-              editavel={editavel}
-              onEditar={abrirEdicao}
-              onExcluir={excluir}
-              onAlterarStatus={alterarStatus}
-            />
-          )}
+          <button type="button" className="btn btn-secundario" onClick={onFechar}>Cancelar</button>
+          <button type="submit" form="form-sonho" className="btn btn-primario" disabled={salvando}>{salvando ? 'Salvando...' : objetivo ? 'Salvar alterações' : 'Criar sonho'}</button>
         </>
-      )}
-
-      {modalAberto && (
-        <div className="modal-overlay" onClick={() => setModalAberto(false)}>
-          <div className="modal-content" style={{ height: 'auto', maxHeight: '90vh' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{editandoId ? '✏️ Editar Meta' : '🎯 Nova Meta ou Sonho'}</h3>
-              <button className="close-btn" onClick={() => setModalAberto(false)}>✕</button>
-            </div>
-            <div className="modal-body" style={{ display: 'block', overflowY: 'auto', padding: '20px' }}>
-              <form onSubmit={salvar} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <div className="form-group">
-                  <label>Categoria</label>
-                  <div className="categoria-picker">
-                    {categoriasDisponiveis.map((c) => (
-                      <button
-                        type="button"
-                        key={c.id}
-                        className={`categoria-chip ${form.categoria === c.id ? 'active' : ''}`}
-                        onClick={() => setForm({ ...form, categoria: c.id })}
-                      >
-                        <span>{c.icone}</span> {c.id}
-                      </button>
-                    ))}
-
-                    {!novaCategoriaAberta ? (
-                      <button
-                        type="button"
-                        className="categoria-chip categoria-chip-nova"
-                        onClick={() => setNovaCategoriaAberta(true)}
-                      >
-                        <span>➕</span> Nova categoria
-                      </button>
-                    ) : (
-                      <div className="categoria-nova-inline">
-                        <input
-                          type="text"
-                          autoFocus
-                          className="search-input"
-                          style={{ padding: '6px 10px', fontSize: '13px' }}
-                          placeholder="Nome da categoria"
-                          maxLength={60}
-                          value={novaCategoriaTexto}
-                          onChange={(e) => setNovaCategoriaTexto(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              confirmarNovaCategoria();
-                            }
-                            if (e.key === 'Escape') {
-                              setNovaCategoriaAberta(false);
-                              setNovaCategoriaTexto('');
-                            }
-                          }}
-                        />
-                        <button type="button" className="btn-secondary" style={{ padding: '6px 10px' }} onClick={confirmarNovaCategoria}>
-                          ✓ Adicionar
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          style={{ padding: '6px 10px' }}
-                          onClick={() => { setNovaCategoriaAberta(false); setNovaCategoriaTexto(''); }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontWeight: 600 }}>Título da meta</label>
-                  <input
-                    type="text"
-                    className="search-input"
-                    style={{ width: '100%', padding: '10px' }}
-                    placeholder="Ex.: Viagem para o Nordeste, PS5, Reserva de emergência..."
-                    value={form.titulo}
-                    onChange={(e) => setForm({ ...form, titulo: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontWeight: 600 }}>Tipo</label>
-                  <select
-                    className="select-filter"
-                    style={{ width: '100%', padding: '10px' }}
-                    value={form.tipo}
-                    onChange={(e) => setForm({ ...form, tipo: e.target.value })}
-                  >
-                    <option value="dinheiro">Meta financeira (juntar dinheiro)</option>
-                    <option value="produto">Comprar um produto específico</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontWeight: 600 }}>Valor alvo (R$)</label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      className="search-input" style={{ width: '100%', padding: '10px' }}
-                      value={form.valorAlvo}
-                      onChange={(e) => setForm({ ...form, valorAlvo: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontWeight: 600 }}>Já guardado (R$)</label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      className="search-input" style={{ width: '100%', padding: '10px' }}
-                      value={form.valorAtual}
-                      onChange={(e) => setForm({ ...form, valorAtual: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontWeight: 600 }}>Prazo (opcional)</label>
-                  <input
-                    type="date"
-                    className="search-input" style={{ width: '100%', padding: '10px' }}
-                    value={form.prazo}
-                    onChange={(e) => setForm({ ...form, prazo: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontWeight: 600 }}>Descrição (opcional)</label>
-                  <textarea
-                    className="search-input"
-                    style={{ width: '100%', padding: '10px', minHeight: '70px', resize: 'vertical' }}
-                    value={form.descricao}
-                    onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-                    placeholder="Detalhes, motivação, onde comprar..."
-                  />
-                </div>
-
-                <button type="submit" className="btn-primary" disabled={salvando} style={{ marginTop: '6px' }}>
-                  {salvando ? 'Salvando...' : editandoId ? 'Salvar alterações' : 'Criar meta'}
-                </button>
-              </form>
-            </div>
+      }
+    >
+      <form id="form-sonho" onSubmit={salvar} className="pilha">
+        <Alerta>{erro}</Alerta>
+        <Campo rotulo="Categoria">
+          <div className="categoria-picker">
+            {categorias.map((c) => (
+              <button type="button" key={c.id} className={`chip ${form.categoria === c.id ? 'ativo' : ''}`} onClick={() => setForm((f) => ({ ...f, categoria: c.id }))}>
+                <span aria-hidden="true">{c.icone}</span> {c.id}
+              </button>
+            ))}
           </div>
+        </Campo>
+        <div className="linha">
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 180 }}
+            placeholder="Outra categoria (opcional)"
+            maxLength={60}
+            value={novaCategoria}
+            onChange={(e) => setNovaCategoria(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                adicionarCategoria();
+              }
+            }}
+          />
+          <button type="button" className="btn btn-secundario" onClick={adicionarCategoria} disabled={!novaCategoria.trim()}>Usar categoria</button>
         </div>
-      )}
-    </div>
+        <div className="grade-form">
+          <Campo rotulo="Título" className="inteira">
+            <input required maxLength={120} value={form.titulo} onChange={set('titulo')} placeholder="Ex.: Viagem para o Nordeste, Reserva de emergência..." />
+          </Campo>
+          <Campo rotulo="Tipo">
+            <select value={form.tipo} onChange={set('tipo')}>
+              <option value="dinheiro">Juntar um valor</option>
+              <option value="produto">Comprar um produto</option>
+            </select>
+          </Campo>
+          <Campo rotulo="Prazo (opcional)">
+            <input type="date" value={form.prazo} onChange={set('prazo')} />
+          </Campo>
+          <Campo rotulo="Valor alvo (R$)">
+            <input required type="number" min="0" step="0.01" inputMode="decimal" value={form.valorAlvo} onChange={set('valorAlvo')} />
+          </Campo>
+          <Campo rotulo="Já guardado (R$)">
+            <input type="number" min="0" step="0.01" inputMode="decimal" value={form.valorAtual} onChange={set('valorAtual')} />
+          </Campo>
+          <Campo rotulo="Descrição (opcional)" className="inteira">
+            <textarea maxLength={500} value={form.descricao} onChange={set('descricao')} placeholder="Motivação, detalhes, onde comprar..." />
+          </Campo>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
-function SecaoObjetivos({ titulo, lista, formatCurrency, editavel, onEditar, onExcluir, onAlterarStatus }) {
+function AporteModal({ objetivo, onFechar, onSalvo }) {
+  const toast = useToast();
+  const [valor, setValor] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState('');
+
+  const salvar = async (e) => {
+    e.preventDefault();
+    const v = Number(valor);
+    if (!v) return;
+    setSalvando(true);
+    try {
+      const novoTotal = Math.max(objetivo.valorAtual + v, 0);
+      await api.put(`/objetivos/${objetivo.id}`, { valorAtual: novoTotal });
+      toast(novoTotal >= objetivo.valorAlvo ? `Meta atingida! 🎉 Marque “${objetivo.titulo}” como realizado.` : 'Valor guardado no sonho.');
+      onSalvo();
+      onFechar();
+    } catch (err) {
+      setErro(err.message);
+    } finally {
+      setSalvando(false);
+    }
+  };
+
   return (
-    <div style={{ marginBottom: '24px' }}>
-      <h4 style={{ margin: '4px 0 12px 0', color: '#64748b', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-        {titulo} ({lista.length})
-      </h4>
-      <div className="objetivos-grid">
-        {lista.map((obj) => (
-          <div key={obj.id} className="objetivo-card">
-            <div className="objetivo-card-topo">
-              <span className="objetivo-icone">{ICONE_POR_CATEGORIA[obj.categoria] || '🌟'}</span>
-              <span className="tag-category">{obj.categoria}</span>
-            </div>
-            <h4 className="objetivo-titulo">{obj.titulo}</h4>
-            {obj.descricao && <p className="objetivo-descricao">{obj.descricao}</p>}
-
-            <div className="objetivo-valores">
-              <span>{formatCurrency(obj.valorAtual)}</span>
-              <span className="objetivo-valor-alvo">de {formatCurrency(obj.valorAlvo)}</span>
-            </div>
-            <div className="bar-track">
-              <div
-                className="bar-fill"
-                style={{ width: `${obj.progresso}%`, background: obj.progresso >= 100 ? '#10b981' : '#d97706' }}
-              />
-            </div>
-            <div className="objetivo-rodape">
-              <span>{obj.progresso.toFixed(0)}% concluído</span>
-              {obj.prazo && <span>🗓️ {new Date(obj.prazo + 'T00:00:00').toLocaleDateString('pt-BR')}</span>}
-            </div>
-
-            {editavel && (
-              <div className="objetivo-acoes">
-                <button type="button" className="btn-secondary" onClick={() => onEditar(obj)}>✏️ Editar</button>
-                {obj.status === 'em_andamento' && (
-                  <button type="button" className="btn-secondary" onClick={() => onAlterarStatus(obj, 'concluido')}>✅ Concluir</button>
-                )}
-                {obj.status === 'em_andamento' && (
-                  <button type="button" className="btn-danger-outline" onClick={() => onAlterarStatus(obj, 'cancelado')}>🚫 Cancelar</button>
-                )}
-                <button type="button" className="btn-danger-outline" onClick={() => onExcluir(obj)}>🗑️</button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <Modal
+      titulo={`Guardar em “${objetivo.titulo}”`}
+      subtitulo={`Hoje: ${formatarMoeda(objetivo.valorAtual)} de ${formatarMoeda(objetivo.valorAlvo)}`}
+      largura="sm"
+      onFechar={onFechar}
+      rodape={
+        <>
+          <button type="button" className="btn btn-secundario" onClick={onFechar}>Cancelar</button>
+          <button type="submit" form="form-aporte" className="btn btn-primario" disabled={salvando || !Number(valor)}>{salvando ? 'Salvando...' : 'Confirmar'}</button>
+        </>
+      }
+    >
+      <form id="form-aporte" onSubmit={salvar} className="pilha">
+        <Alerta>{erro}</Alerta>
+        <Campo rotulo="Quanto você guardou? (R$)" ajuda="Use um valor negativo para registrar uma retirada.">
+          <input autoFocus type="number" step="0.01" inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} />
+        </Campo>
+      </form>
+    </Modal>
   );
 }

@@ -1,98 +1,50 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { fetchApi, uploadApi } from '../lib/api';
+import React, { useRef, useState } from 'react';
+import { Card, Campo, Alerta, Vazio, Carregando, useToast } from '../components/ui';
+import { useApi } from '../hooks/useApi';
+import { api, uploadApi } from '../lib/api';
+import { qs } from '../lib/format';
 
 const DIAS_DO_MES = Array.from({ length: 31 }, (_, i) => i + 1);
-
-const STATUS_LABEL = {
-  concluido: { texto: 'Concluída', cor: '#10b981' },
-  erro: { texto: 'Erro', cor: '#ef4444' },
-  vazio: { texto: 'Sem lançamentos', cor: '#f59e0b' },
+const STATUS = {
+  concluido: { texto: 'Concluída', classe: 'tag-sucesso' },
+  erro: { texto: 'Erro', classe: 'tag-perigo' },
+  vazio: { texto: 'Sem lançamentos', classe: 'tag-atencao' },
+};
+const EXTENSOES = ['csv', 'xls', 'xlsx', 'ofx', 'pdf', 'jpg', 'jpeg', 'png', 'webp'];
+const TAMANHO_MAX_MB = 12;
+const METODO = {
+  planilha: 'lido direto da planilha (sem IA)',
+  ia_texto: 'layout diferente — lido com IA',
+  ia: 'lido com IA',
 };
 
-const TIPOS_ACEITOS = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-const TAMANHO_MAX_MB = 12;
-
 /**
- * @param {string|null} userId - se null, opera sobre o próprio usuário
- *   logado. Se informado, staff (planejador/oule) vendo/importando o
- *   extrato de um cliente específico — mesmo padrão de ObjetivosPage.
- * @param {boolean} editavel - permite enviar arquivos e alterar o dia
- *   do lembrete. Sempre true na prática (tanto cliente quanto staff
- *   podem operar esta tela), mas mantido por simetria com as outras
- *   páginas do painel.
- * @param {Function} onImportado - chamado depois de uma importação bem
- *   sucedida, para o componente pai recarregar a lista de transações.
+ * Importação manual de extrato/fatura: alternativa ao Open Finance.
+ * Planilhas (CSV/XLS/XLSX) e OFX são lidas direto, sem IA; PDF e foto
+ * passam pela IA. Escolhendo um cartão, o arquivo é tratado como fatura
+ * e cada compra vai para a data de pagamento certa.
  */
-export default function ImportarExtratoPage({ userId = null, editavel = true, onImportado }) {
-  const [diaImportacao, setDiaImportacao] = useState('');
-  const [carregandoConfig, setCarregandoConfig] = useState(true);
-  const [salvandoDia, setSalvandoDia] = useState(false);
-  const [mensagemDia, setMensagemDia] = useState('');
-
-  const [historico, setHistorico] = useState([]);
-  const [carregandoHistorico, setCarregandoHistorico] = useState(true);
-
+export default function ImportarExtratoPage({ userId = null, onImportado }) {
+  const toast = useToast();
+  const inputRef = useRef(null);
   const [arquivo, setArquivo] = useState(null);
+  const [cartaoId, setCartaoId] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState('');
   const [resultado, setResultado] = useState(null);
-  const [arrastandoSobre, setArrastandoSobre] = useState(false);
-  const inputRef = useRef(null);
+  const [arrastando, setArrastando] = useState(false);
 
-  const qsUserId = userId ? `?userId=${userId}` : '';
+  const { dados: config, setDados: setConfig } = useApi(`/extrato/config${qs({ userId })}`);
+  const { dados: historico, carregando: carregandoHistorico, recarregar: recarregarHistorico } = useApi(`/extrato/importacoes${qs({ userId })}`);
+  const { dados: cartoes } = useApi(`/cartoes${qs({ userId })}`);
 
-  const carregarConfig = useCallback(async () => {
-    setCarregandoConfig(true);
-    try {
-      const data = await fetchApi(`/extrato/config${qsUserId}`);
-      setDiaImportacao(data.diaImportacao ? String(data.diaImportacao) : '');
-    } catch (err) {
-      // Não bloqueia a tela por causa disso — o upload continua funcionando.
-      console.error('Erro ao carregar dia de importação:', err.message);
-    } finally {
-      setCarregandoConfig(false);
-    }
-  }, [qsUserId]);
-
-  const carregarHistorico = useCallback(async () => {
-    setCarregandoHistorico(true);
-    try {
-      const data = await fetchApi(`/extrato/importacoes${qsUserId}`);
-      setHistorico(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Erro ao carregar histórico de importações:', err.message);
-    } finally {
-      setCarregandoHistorico(false);
-    }
-  }, [qsUserId]);
-
-  useEffect(() => { carregarConfig(); }, [carregarConfig]);
-  useEffect(() => { carregarHistorico(); }, [carregarHistorico]);
-
-  const salvarDia = async (valor) => {
-    setDiaImportacao(valor);
-    setSalvandoDia(true);
-    setMensagemDia('');
-    try {
-      await fetchApi('/extrato/config', {
-        method: 'PUT',
-        body: JSON.stringify({ diaImportacao: valor ? Number(valor) : null, ...(userId ? { userId } : {}) }),
-      });
-      setMensagemDia('Lembrete salvo!');
-      setTimeout(() => setMensagemDia(''), 2500);
-    } catch (err) {
-      setMensagemDia(err.message || 'Erro ao salvar o dia do lembrete.');
-    } finally {
-      setSalvandoDia(false);
-    }
-  };
-
-  const validarEDefinirArquivo = (file) => {
+  const escolher = (file) => {
     setErro('');
     setResultado(null);
     if (!file) return;
-    if (!TIPOS_ACEITOS.includes(file.type)) {
-      setErro('Formato não suportado. Envie um PDF ou uma foto/print nítida do extrato (JPG, PNG ou WEBP).');
+    const ext = file.name.toLowerCase().split('.').pop();
+    if (!EXTENSOES.includes(ext)) {
+      setErro('Formato não suportado. Envie CSV, XLS, XLSX ou OFX exportado do banco — ou PDF/foto nítida.');
       return;
     }
     if (file.size > TAMANHO_MAX_MB * 1024 * 1024) {
@@ -102,165 +54,157 @@ export default function ImportarExtratoPage({ userId = null, editavel = true, on
     setArquivo(file);
   };
 
-  const enviarExtrato = async () => {
+  const enviar = async () => {
     if (!arquivo) return;
     setEnviando(true);
     setErro('');
     setResultado(null);
     try {
-      const formData = new FormData();
-      formData.append('arquivo', arquivo);
-      if (userId) formData.append('userId', userId);
-
-      const data = await uploadApi('/extrato/importar', formData);
+      const fd = new FormData();
+      fd.append('arquivo', arquivo);
+      if (userId) fd.append('userId', userId);
+      if (cartaoId) fd.append('cartaoId', cartaoId);
+      const data = await uploadApi('/extrato/importar', fd);
       setResultado(data);
       setArquivo(null);
       if (inputRef.current) inputRef.current.value = '';
-      await carregarHistorico();
-      if (onImportado) await onImportado();
+      toast(`${data.count} ${data.count === 1 ? 'lançamento importado' : 'lançamentos importados'}.`);
+      recarregarHistorico();
+      onImportado?.();
     } catch (err) {
-      setErro(err.message || 'Não foi possível importar este extrato.');
+      setErro(err.message);
+      recarregarHistorico();
     } finally {
       setEnviando(false);
     }
   };
 
+  const salvarDia = async (valor) => {
+    try {
+      const r = await api.put('/extrato/config', { diaImportacao: valor ? Number(valor) : null, ...(userId ? { userId } : {}) });
+      setConfig(r);
+      toast(valor ? `Lembrete definido para todo dia ${valor}.` : 'Lembrete removido.');
+    } catch (err) {
+      toast(err.message, 'erro');
+    }
+  };
+
+  const ehImagemOuPdf = arquivo && /\.(pdf|jpe?g|png|webp)$/i.test(arquivo.name);
+
   return (
-    <div>
-      <div className="table-card" style={{ padding: '32px', marginBottom: '20px' }}>
-        <div className="open-finance-hero" style={{ textAlign: 'center' }}>
-          <span className="of-icon">📄</span>
-          <h2>Importar Extrato Manualmente</h2>
-          <p style={{ maxWidth: '560px', margin: '12px auto 4px auto', color: '#64748b' }}>
-            Não quer (ou não pode) conectar o banco pelo Open Finance? Envie o PDF do extrato ou uma foto legível
-            todo mês e a IA lança as transações automaticamente no seu painel — sem duplicar o que já foi importado.
-          </p>
-        </div>
-
-        {editavel && (
-          <>
-            {erro && <div className="auth-alert error" style={{ marginTop: '20px' }}>{erro}</div>}
-
-            {resultado && (
-              <div style={{ marginTop: '20px', padding: '14px 16px', background: '#d1fae5', color: '#065f46', borderRadius: '8px', fontSize: '14px' }}>
-                ✅ <strong>{resultado.count}</strong> {resultado.count === 1 ? 'transação nova importada' : 'transações novas importadas'}.
-                {resultado.duplicadas > 0 && ` ${resultado.duplicadas} já existiam e foram ignoradas.`}
-              </div>
-            )}
-
-            <div
-              className={`extrato-dropzone ${arrastandoSobre ? 'arrastando' : ''}`}
-              style={{ marginTop: '24px' }}
-              onClick={() => inputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setArrastandoSobre(true); }}
-              onDragLeave={() => setArrastandoSobre(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setArrastandoSobre(false);
-                validarEDefinirArquivo(e.dataTransfer.files?.[0]);
-              }}
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*"
-                style={{ display: 'none' }}
-                onChange={(e) => validarEDefinirArquivo(e.target.files?.[0])}
-              />
-              {arquivo ? (
-                <>
-                  <span style={{ fontSize: '32px' }}>📎</span>
-                  <p style={{ fontWeight: 600, margin: '8px 0 2px 0' }}>{arquivo.name}</p>
-                  <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>{(arquivo.size / 1024 / 1024).toFixed(2)} MB — clique para trocar</p>
-                </>
-              ) : (
-                <>
-                  <span style={{ fontSize: '32px' }}>⬆️</span>
-                  <p style={{ fontWeight: 600, margin: '8px 0 2px 0' }}>Arraste o extrato aqui ou clique para escolher</p>
-                  <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>PDF, JPG, PNG ou WEBP — até {TAMANHO_MAX_MB}MB</p>
-                </>
-              )}
-            </div>
-
-            <div style={{ textAlign: 'center', marginTop: '18px' }}>
-              <button
-                type="button"
-                className="btn-bank"
-                style={{ padding: '14px 28px', fontSize: '16px' }}
-                disabled={!arquivo || enviando}
-                onClick={enviarExtrato}
-              >
-                {enviando ? '⏳ Lendo extrato com IA...' : '🚀 Importar Extrato'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="table-card" style={{ padding: '32px', marginBottom: '20px' }}>
-        <h3 style={{ marginBottom: '8px' }}>🗓️ Lembrete mensal</h3>
-        <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '16px' }}>
-          Escolha (ou combine com seu planejador) o dia do mês em que o extrato costuma fechar, para lembrar de
-          enviar sempre na mesma data.
+    <div className="pilha">
+      <Card titulo="Importar extrato ou fatura" icone="📄">
+        <p className="texto-suave" style={{ marginBottom: 16 }}>
+          Não quer (ou não pode) conectar o banco pelo Open Finance? Exporte o extrato no app ou site do banco e envie aqui.
+          <strong> CSV, Excel (XLS/XLSX) e OFX</strong> são lidos na hora, sem IA. <strong>PDF e foto</strong> também funcionam, lidos pela IA.
+          Lançamentos repetidos são ignorados automaticamente.
         </p>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            className="select-filter"
-            style={{ padding: '10px', minWidth: '160px' }}
-            value={diaImportacao}
-            disabled={carregandoConfig || salvandoDia}
-            onChange={(e) => salvarDia(e.target.value)}
-          >
-            <option value="">Sem lembrete definido</option>
-            {DIAS_DO_MES.map((dia) => (
-              <option key={dia} value={dia}>Todo dia {dia}</option>
-            ))}
-          </select>
-          {salvandoDia && <span style={{ color: '#64748b', fontSize: '13px' }}>Salvando...</span>}
-          {mensagemDia && <span style={{ color: '#10b981', fontSize: '13px' }}>{mensagemDia}</span>}
-        </div>
-      </div>
 
-      <div className="table-card">
-        <div className="card-header-flex" style={{ marginBottom: '16px' }}>
-          <h3>📜 Histórico de Importações</h3>
-          <span className="badge-count">{historico.length}</span>
+        <div
+          className={`dropzone ${arrastando ? 'arrastando' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setArrastando(true); }}
+          onDragLeave={() => setArrastando(false)}
+          onDrop={(e) => { e.preventDefault(); setArrastando(false); escolher(e.dataTransfer.files?.[0]); }}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            hidden
+            accept=".csv,.xls,.xlsx,.ofx,.pdf,.jpg,.jpeg,.png,.webp,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,image/*"
+            onChange={(e) => escolher(e.target.files?.[0])}
+          />
+          <span style={{ fontSize: 30 }} aria-hidden="true">{arquivo ? '📎' : '⬆️'}</span>
+          {arquivo ? (
+            <>
+              <strong>{arquivo.name}</strong>
+              <span className="texto-suave texto-pequeno">{(arquivo.size / 1024 / 1024).toFixed(2)} MB — clique para trocar</span>
+            </>
+          ) : (
+            <>
+              <strong>Arraste o arquivo aqui ou clique para escolher</strong>
+              <span className="texto-suave texto-pequeno">Até {TAMANHO_MAX_MB}MB</span>
+            </>
+          )}
+          <div className="formatos">
+            {['CSV', 'XLS', 'XLSX', 'OFX', 'PDF', 'Foto'].map((f) => <span key={f} className="tag">{f}</span>)}
+          </div>
         </div>
 
-        {carregandoHistorico ? (
-          <div className="empty-state-box"><p>Carregando histórico...</p></div>
-        ) : historico.length === 0 ? (
-          <div className="empty-state-box"><p>Nenhum extrato importado ainda.</p></div>
+        <div className="grade-form" style={{ marginTop: 16 }}>
+          <Campo rotulo="Este arquivo é…" ajuda="Escolhendo um cartão, cada compra é colocada na data de pagamento da fatura certa.">
+            <select className="input" value={cartaoId} onChange={(e) => setCartaoId(e.target.value)}>
+              <option value="">Extrato da conta corrente / poupança</option>
+              {(cartoes || []).map((c) => <option key={c.id} value={c.id}>Fatura do cartão {c.nome}</option>)}
+            </select>
+          </Campo>
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <button type="button" className="btn btn-primario btn-bloco" disabled={!arquivo || enviando} onClick={enviar}>
+              {enviando ? (ehImagemOuPdf ? '⏳ Lendo com IA...' : '⏳ Importando...') : '🚀 Importar'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }} className="pilha">
+          <Alerta>{erro}</Alerta>
+          {resultado && (
+            <Alerta tipo="sucesso">
+              ✅ <strong>{resultado.count}</strong> {resultado.count === 1 ? 'lançamento novo' : 'lançamentos novos'}
+              {resultado.duplicadas > 0 && ` · ${resultado.duplicadas} já existiam e foram ignorados`}
+              {resultado.metodo && ` · ${METODO[resultado.metodo]}`}
+              {resultado.cartao && ` · fatura do ${resultado.cartao}`}.
+            </Alerta>
+          )}
+        </div>
+      </Card>
+
+      <Card titulo="Como exportar do seu banco" icone="❓">
+        <ul style={{ paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <li><strong>Nubank:</strong> app → cartão ou conta → “Exportar fatura/extrato” → CSV.</li>
+          <li><strong>Itaú, Bradesco, Santander, BB, Caixa:</strong> internet banking → Extrato → “Salvar como” Excel, OFX ou PDF.</li>
+          <li><strong>Inter, C6 e outros:</strong> extrato → exportar em PDF ou planilha.</li>
+          <li>Prefira <strong>OFX ou planilha</strong>: é mais rápido e mais preciso do que PDF ou foto.</li>
+        </ul>
+      </Card>
+
+      <Card titulo="Lembrete mensal" icone="🗓️">
+        <p className="texto-suave" style={{ marginBottom: 12 }}>Combine com seu planejador o dia do mês para enviar o extrato.</p>
+        <select className="input" style={{ maxWidth: 260 }} value={config?.diaImportacao || ''} onChange={(e) => salvarDia(e.target.value)} aria-label="Dia do lembrete">
+          <option value="">Sem lembrete</option>
+          {DIAS_DO_MES.map((d) => <option key={d} value={d}>Todo dia {d}</option>)}
+        </select>
+      </Card>
+
+      <Card titulo="Histórico de importações" icone="📜" semPadding>
+        {carregandoHistorico && !historico ? <Carregando /> : !historico || historico.length === 0 ? (
+          <Vazio icone="📜" texto="Nenhum arquivo importado ainda." />
         ) : (
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>Arquivo</th>
-                <th>Data</th>
-                <th>Novas transações</th>
-                <th>Duplicadas ignoradas</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {historico.map((h) => (
-                <tr key={h.id}>
-                  <td>{h.nomeArquivo}</td>
-                  <td>{new Date(h.createdAt).toLocaleString('pt-BR')}</td>
-                  <td className="center-text">{h.quantidadeTransacoes}</td>
-                  <td className="center-text">{h.quantidadeDuplicadas}</td>
-                  <td>
-                    <span style={{ color: STATUS_LABEL[h.status]?.cor || '#64748b', fontWeight: 600 }}>
-                      {STATUS_LABEL[h.status]?.texto || h.status}
-                    </span>
-                    {h.mensagemErro && <div style={{ fontSize: '12px', color: '#94a3b8' }}>{h.mensagemErro}</div>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="tabela-wrapper">
+            <table className="tabela">
+              <thead>
+                <tr><th>Arquivo</th><th>Data</th><th className="num">Novos</th><th className="num">Repetidos</th><th>Situação</th></tr>
+              </thead>
+              <tbody>
+                {historico.map((h) => (
+                  <tr key={h.id}>
+                    <td style={{ maxWidth: 280 }}>{h.nomeArquivo}</td>
+                    <td>{new Date(h.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                    <td className="num">{h.quantidadeTransacoes}</td>
+                    <td className="num">{h.quantidadeDuplicadas}</td>
+                    <td>
+                      <span className={`tag ${STATUS[h.status]?.classe || ''}`}>{STATUS[h.status]?.texto || h.status}</span>
+                      {h.mensagemErro && <div className="texto-suave texto-pequeno">{h.mensagemErro}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

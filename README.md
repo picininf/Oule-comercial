@@ -1,103 +1,107 @@
-# Gestão Financeira Pessoal — Backend + Frontend (versão segura)
+# Oule | App — planejamento financeiro com planejador
 
-> 📱 Quer gerar o app Android (Capacitor) via VSCode/PowerShell/Android
-> Studio? Veja **[README-ANDROID.md](./README-ANDROID.md)** — lá está o
-> passo a passo e a lista do que foi corrigido no projeto Android.
+App de gestão financeira pessoal acompanhada por um **planejador financeiro**:
+Open Finance (Pluggy), importação de extratos (CSV/XLS/XLSX/OFX/PDF/foto),
+cartões com faturas nas datas certas, plano anual e dos próximos anos,
+sonhos, aposentadoria/liberdade financeira, pagamentos do mês com lembretes
+e assistente no WhatsApp.
 
-Estrutura reorganizada a partir do App.jsx/server.js originais, com foco em
-segurança para um sistema que movimenta dados bancários reais via Open
-Finance (Pluggy) e comprovantes via WhatsApp (Baileys + Gemini).
+> 📱 App Android (Capacitor): veja **[README-ANDROID.md](./README-ANDROID.md)**.
+> 🆕 O que mudou nesta versão (cartão por cartão do Trello): **[ATUALIZACOES.md](./ATUALIZACOES.md)**.
 
-## Antes de rodar
+## Estrutura
 
-### 1. Backend
 ```
+backend/            API Node/Express (Supabase service_role, Pluggy, Gemini, WhatsApp)
+  config/           cliente Supabase e conferência das variáveis de ambiente
+  middleware/       autenticação/papéis, CORS, rate limit, erros (com request id)
+  routes/           uma rota por área (transacoes, plano, cartoes, pagamentos, analises...)
+  services/         regras de negócio (plano, projeção, faturas, planilhas, lembretes...)
+  utils/            categorias Oule, fatura, datas, acesso por papel
+  validators/       schemas zod (mensagens em português)
+  sql/              migrações do Supabase (rode em ordem: v1 → v4)
+  scripts/          admin, webhook, normalização de categorias, sync manual
+  tests/            testes automatizados (npm test)
+frontend/           React + Vite + Capacitor
+  src/pages/        uma página por aba (cliente) e pages/admin (equipe)
+  src/components/   UI compartilhada (modal, toasts, tabela, exportação...)
+  src/lib/          API, categorias, formatação, exportação (CSV/Excel/PDF/PNG)
+```
+
+## Como rodar
+
+### 1. Banco de dados (Supabase)
+
+No SQL Editor do Supabase, rode **em ordem** (todos podem ser rodados de novo
+sem quebrar nada):
+
+1. `backend/sql/schema.sql`
+2. `backend/sql/schema_v2_roles.sql`
+3. `backend/sql/schema_v3_extrato.sql`
+4. `backend/sql/schema_v4_oule.sql` ← **novo e obrigatório nesta versão**
+
+### 2. Backend
+
+```powershell
 cd backend
-cp .env.example .env   # preencha com suas chaves reais
+copy .env.example .env      # preencha (veja os comentários no arquivo)
 npm install
-```
-
-Rode o `backend/sql/schema.sql` no SQL Editor do seu projeto Supabase —
-isso ativa o Row Level Security e cria as tabelas `open_finance_items`
-e `webhook_events`, essenciais para a integração real com o banco.
-
-Suba o backend (em dev, atrás de um túnel HTTPS como o ngrok):
-```
+npm run normalizar:categorias -- --teste   # mostra o que mudaria nas categorias antigas
+npm run normalizar:categorias              # aplica (uma vez, depois da migração v4)
 npm run dev
 ```
 
-Registre o webhook na Pluggy (uma vez, e sempre que a URL pública mudar):
-```
-npm run setup:webhook
-```
+Scripts úteis:
 
-### 2. Frontend
-```
+| Comando | O que faz |
+|---|---|
+| `npm run dev` | sobe a API com recarga automática |
+| `npm test` | testes de regras (fatura, categorias, planilhas, plano, aposentadoria) |
+| `npm run check` | confere a sintaxe de todos os arquivos |
+| `npm run admin:criar` | cria/redefine a conta admin (exige `ADMIN_EMAIL` e `ADMIN_PASSWORD` forte) |
+| `npm run setup:webhook` | registra o webhook na Pluggy (sempre que a URL pública mudar) |
+| `npm run normalizar:categorias` | converte categorias antigas para as Categorias Oule |
+| `npm run sync:item -- <itemId>` | força a sincronização de uma conexão do Open Finance |
+
+### 3. Frontend
+
+```powershell
 cd frontend
-cp .env.example .env   # aponte VITE_API_URL para a mesma URL do backend
+copy .env.example .env      # VITE_API_URL = URL do backend + /api
 npm install
 npm run dev
 ```
 
-## Painel de administrador
+## Papéis e acesso
 
-Existe um segundo tipo de acesso, só para uso interno: ao logar com um
-e-mail configurado como admin, a pessoa cai numa interface totalmente
-diferente da dos usuários comuns — visão consolidada de todos os
-usuários (métricas gerais, despesas por categoria somadas, evolução
-mensal e um ranking) e uma tela de "Usuários" com a visão individual
-completa de cada um (perfil, métricas e extrato).
+| Papel | Vê |
+|---|---|
+| `cliente` | só os próprios dados |
+| `planejador` | os próprios dados + os clientes atribuídos a ele |
+| `oule` (admin) | todos os clientes; gerencia planejadores e o WhatsApp do robô |
 
-**Como criar a conta admin** (uma vez só, depois de configurar o `.env`
-do backend):
-```
-cd backend
-node scripts/create-admin-user.js
-```
-Por padrão isso cria `admin@gmail.com` / `12345678` (valores lidos de
-`ADMIN_EMAIL` / `ADMIN_PASSWORD` no `.env`, com esses como fallback).
-Depois é só logar normalmente pela tela de login do app com esse e-mail
-e senha.
+- O papel é decidido **só no backend** (`profiles.role`), nunca pelo app.
+- O admin "raiz" é o e-mail de `ADMIN_EMAIL`, e só depois de **confirmado** no
+  Supabase Auth. Não existe mais e-mail/senha padrão (antes, quem criasse a
+  conta `admin@gmail.com` virava administrador).
+- A equipe abre um cliente em **Clientes** e tem todas as telas dele em abas
+  (plano, futuro, sonhos, pagamentos, cartões, transações, importação...).
 
-**Como funciona a autorização:** o front nunca decide sozinho quem é
-admin — ele pergunta pro backend (`GET /api/admin/status`), que compara
-`req.userEmail` (extraído do token JWT já validado pelo Supabase) com
-`ADMIN_EMAIL` do `.env`. Isso é o que protege de verdade os dados de
-todo mundo: mesmo que alguém adultere o app no celular, as rotas
-`/api/admin/*` continuam recusando qualquer usuário cujo e-mail não seja
-o configurado.
+## Segurança (resumo)
 
-⚠️ **Antes de usar em produção com dados reais**, troque a senha padrão
-`12345678` — ela é fraca de propósito só para o primeiro acesso, e essa
-conta enxerga o extrato financeiro de todos os usuários cadastrados.
-Troque pelo Supabase Studio (Authentication → Users → Reset password)
-ou rodando o script de novo com `ADMIN_PASSWORD` diferente no `.env`.
+- Toda rota exige `Authorization: Bearer <token>`; o `userId` vem do token,
+  nunca do corpo. Staff só acessa clientes do seu escopo (`utils/acesso.js`).
+- RLS ativo em todas as tabelas; escrita só pelo backend (service_role).
+- Validação zod em toda entrada; IDs de rota validados; mensagens de erro
+  sem detalhes internos (com `requestId` para rastrear no log).
+- Extratos lidos em memória e descartados; comprovantes só para o dono e a
+  equipe responsável; comparativos entre pessoas só para grupos ≥ 5.
+- Helmet com CSP restritiva, CORS por lista branca, rate limit, desligamento
+  limpo no deploy, servidor sobe mesmo sem Pluggy/Gemini configurados.
 
-## Migrando do sandbox para o Nubank real
+## Migrando o Open Finance do sandbox para produção
 
-1. No painel da Pluggy, mude do ambiente Sandbox para Produção e gere
-   novas credenciais (`PLUGGY_CLIENT_ID` / `PLUGGY_CLIENT_SECRET`) de
-   produção.
-2. Em `backend/routes/openFinance.routes.js`, `includeSandbox` já está
-   condicionado a `NODE_ENV`; garanta que `NODE_ENV=production` no
-   ambiente de produção.
-3. Rode `npm run setup:webhook` novamente apontando para a URL de
-   produção do backend.
-4. Solicite à Pluggy a habilitação do conector do Nubank no seu plano,
-   caso ainda não esteja disponível.
-5. Teste peorimeiro com um valor pequeno / conta secundária antes de
-   confiar 100% no fluxo com sua conta principal.
-
-## O que mudou em relação à versão anterior (resumo)
-
-- Toda rota sensível exige `Authorization: Bearer <token>` e usa
-  `req.userId` do token — nunca um `userId` vindo do corpo da requisição.
-- Row Level Security ativado nas tabelas do Supabase.
-- `/uploads` deixou de ser público; comprovantes só são servidos para o
-  dono da transação.
-- CORS restrito a uma lista de origens conhecidas.
-- Webhook da Pluggy autenticado por segredo compartilhado + idempotência
-  por `eventId` + sempre revalida o dado direto na API da Pluggy.
-- Código de vinculação do WhatsApp expira em 10 min e tem rate limit.
-- CPF removido do fluxo de cadastro (dado sensível não essencial ao MVP).
-- Saída de erros da API não vaza mais detalhes internos.
+1. Na Pluggy, gere credenciais de produção (`PLUGGY_CLIENT_ID/SECRET`).
+2. Use `NODE_ENV=production` no servidor (desliga o sandbox e liga HSTS).
+3. Rode `npm run setup:webhook` com a URL de produção.
+4. Teste primeiro com uma conta secundária.

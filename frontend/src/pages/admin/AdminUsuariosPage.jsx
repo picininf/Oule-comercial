@@ -1,169 +1,118 @@
-import React, { useEffect, useState } from 'react';
-import { fetchApi } from '../../lib/api';
-import { getValorAjustado } from '../../lib/finance';
-import MetricCard from '../../components/MetricCard';
-import TransactionTable from '../../components/TransactionTable';
-import PainelAnual from '../../components/PainelAnual';
+import React, { useMemo, useState } from 'react';
+import { Card, Abas, Vazio, useValores } from '../../components/ui';
+import { formatarData } from '../../lib/format';
+import DashboardPage from '../DashboardPage';
+import PerfilPage from '../PerfilPage';
+import PlanoPage from '../PlanoPage';
+import FuturoPage from '../FuturoPage';
 import ObjetivosPage from '../ObjetivosPage';
+import PagamentosPage from '../PagamentosPage';
+import CartoesPage from '../CartoesPage';
+import TransacoesPage from '../TransacoesPage';
 import ImportarExtratoPage from '../ImportarExtratoPage';
+import AnalisesPage from '../AnalisesPage';
+import RetrospectivaPage from '../RetrospectivaPage';
+
+const ABAS_CLIENTE = [
+  { id: 'resumo', nome: 'Resumo', icone: '📊' },
+  { id: 'cadastro', nome: 'Cadastro', icone: '👤' },
+  { id: 'plano', nome: 'Plano x Vida Real', icone: '🗓️' },
+  { id: 'futuro', nome: 'Futuro', icone: '🔭' },
+  { id: 'sonhos', nome: 'Sonhos', icone: '🎯' },
+  { id: 'pagamentos', nome: 'Pagamentos', icone: '🧾' },
+  { id: 'cartoes', nome: 'Cartões', icone: '💳' },
+  { id: 'transacoes', nome: 'Transações', icone: '💱' },
+  { id: 'importar', nome: 'Importar extrato', icone: '📄' },
+  { id: 'analises', nome: 'Análises', icone: '📈' },
+  { id: 'retrospectiva', nome: 'Retrospectiva', icone: '🎉' },
+];
 
 /**
- * Página "Usuários" do admin: lista todo mundo cadastrado e, ao
- * selecionar um usuário, mostra a visão individual completa dele
- * (perfil, métricas, categorias e extrato) — dados que só o admin
- * consegue ver (o backend garante isso via requireAdmin).
+ * Clientes da equipe: lista com busca (nome, e-mail ou código) e, ao
+ * abrir um cliente, todas as telas dele organizadas em abas — o
+ * planejador planeja, importa e ajusta tudo em nome do cliente.
  */
-export default function AdminUsuariosPage({ usuarios, usuarioSelecionadoId, onSelecionar, onVoltar, formatCurrency }) {
-  const [detalhe, setDetalhe] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [erro, setErro] = useState('');
+export default function AdminUsuariosPage({ usuarios, usuarioSelecionadoId, onSelecionar, onVoltar, onAtualizarLista }) {
+  const { fmt } = useValores();
+  const [busca, setBusca] = useState('');
+  const [uf, setUf] = useState('');
+  const [aba, setAba] = useState('resumo');
 
-  useEffect(() => {
-    if (!usuarioSelecionadoId) {
-      setDetalhe(null);
-      return;
-    }
-    let ativo = true;
-    setLoading(true);
-    setErro('');
-    fetchApi(`/admin/usuarios/${usuarioSelecionadoId}`)
-      .then((data) => { if (ativo) setDetalhe(data); })
-      .catch((err) => { if (ativo) setErro(err.message || 'Erro ao carregar usuário.'); })
-      .finally(() => { if (ativo) setLoading(false); });
-    return () => { ativo = false; };
-  }, [usuarioSelecionadoId]);
+  const filtrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    return usuarios
+      .filter((u) => !uf || u.estado === uf)
+      .filter((u) => !termo || [u.nome, u.email, u.codigoCliente, ...(u.tags || [])].some((c) => String(c || '').toLowerCase().includes(termo)))
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [usuarios, busca, uf]);
 
-  if (!usuarioSelecionadoId) {
+  const ufs = [...new Set(usuarios.map((u) => u.estado).filter(Boolean))].sort();
+  const cliente = usuarios.find((u) => u.id === usuarioSelecionadoId);
+
+  if (usuarioSelecionadoId) {
     return (
-      <div className="table-card">
-        <div className="card-header-flex" style={{ marginBottom: '16px' }}>
-          <h3>👥 Todos os Usuários</h3>
-          <span className="badge-count">{usuarios.length} usuários</span>
+      <div className="pilha">
+        <div className="linha-entre">
+          <button type="button" className="btn btn-secundario" onClick={() => { setAba('resumo'); onVoltar(); }}>← Clientes</button>
+          {cliente && (
+            <div className="linha">
+              <strong style={{ color: 'var(--texto-forte)' }}>{cliente.nome}</strong>
+              {cliente.codigoCliente && <span className="codigo-cliente">{cliente.codigoCliente}</span>}
+            </div>
+          )}
         </div>
-        {usuarios.length === 0 ? (
-          <div className="empty-state-box"><p>Nenhum usuário cadastrado além do administrador.</p></div>
-        ) : (
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>Usuário</th>
-                <th>Telefone</th>
-                <th>Banco</th>
-                <th>Saldo Líquido</th>
-                <th>Transações</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {usuarios.map((u) => (
-                <tr key={u.id} onClick={() => onSelecionar(u.id)} style={{ cursor: 'pointer' }}>
-                  <td>
-                    <strong>{u.nome}</strong>
-                    <br />
-                    <small style={{ color: '#64748b' }}>{u.email}</small>
-                  </td>
-                  <td>{u.telefone || '—'}</td>
-                  <td>{u.bancoConectado ? <span className="tag tag-bank">{u.bancoConectado}</span> : '—'}</td>
-                  <td style={{ fontWeight: 700, color: u.saldoLiquido >= 0 ? '#10b981' : '#ef4444' }}>{formatCurrency(u.saldoLiquido)}</td>
-                  <td className="center-text">{u.totalTransacoes}</td>
-                  <td className="center-text">🔍 Ver detalhes</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <Abas abas={ABAS_CLIENTE} ativa={aba} onTrocar={setAba} />
+        {aba === 'resumo' && <DashboardPage userId={usuarioSelecionadoId} onNavegar={setAba} />}
+        {aba === 'cadastro' && <PerfilPage userId={usuarioSelecionadoId} ehStaff onAtualizado={onAtualizarLista} />}
+        {aba === 'plano' && <PlanoPage userId={usuarioSelecionadoId} />}
+        {aba === 'futuro' && <FuturoPage userId={usuarioSelecionadoId} />}
+        {aba === 'sonhos' && <ObjetivosPage userId={usuarioSelecionadoId} />}
+        {aba === 'pagamentos' && <PagamentosPage userId={usuarioSelecionadoId} />}
+        {aba === 'cartoes' && <CartoesPage userId={usuarioSelecionadoId} />}
+        {aba === 'transacoes' && <TransacoesPage userId={usuarioSelecionadoId} />}
+        {aba === 'importar' && <ImportarExtratoPage userId={usuarioSelecionadoId} />}
+        {aba === 'analises' && <AnalisesPage userId={usuarioSelecionadoId} onNavegar={setAba} />}
+        {aba === 'retrospectiva' && <RetrospectivaPage userId={usuarioSelecionadoId} />}
       </div>
     );
   }
 
   return (
-    <div>
-      <button type="button" className="btn-secondary" onClick={onVoltar} style={{ marginBottom: '16px' }}>
-        ← Voltar para a lista
-      </button>
-
-      {loading && <div className="empty-state-box"><p>Carregando dados do usuário...</p></div>}
-      {erro && <div className="auth-alert error">{erro}</div>}
-
-      {detalhe && (
-        <>
-          <div className="table-card" style={{ marginBottom: '20px', padding: '24px' }}>
-            <h3>{detalhe.perfil.nome}</h3>
-            <p style={{ color: '#64748b', marginTop: '4px' }}>{detalhe.perfil.email}</p>
-            <div style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}>
-              {detalhe.perfil.telefone && <span className="tag tag-wa">📱 {detalhe.perfil.telefone}</span>}
-              {detalhe.perfil.bancoConectado && <span className="tag tag-bank">🏦 {detalhe.perfil.bancoConectado}</span>}
-              <span className="tag-category">
-                Cadastrado em {detalhe.perfil.criadoEm ? new Date(detalhe.perfil.criadoEm).toLocaleDateString('pt-BR') : '—'}
-              </span>
-            </div>
-          </div>
-
-          <div className="metrics-grid">
-            <MetricCard label="SALDO LÍQUIDO" icon="💰" value={formatCurrency(detalhe.resumo.saldoLiquido)} color={detalhe.resumo.saldoLiquido >= 0 ? '#10b981' : '#ef4444'} />
-            <MetricCard label="TOTAL ENTRADAS" icon="📥" value={formatCurrency(detalhe.resumo.totalEntradas)} color="#10b981" />
-            <MetricCard label="TOTAL SAÍDAS" icon="📤" value={formatCurrency(detalhe.resumo.totalSaidas)} color="#ef4444" />
-            <MetricCard label="TAXA DE POUPANÇA" icon="🎯" value={`${detalhe.resumo.taxaPoupanca.toFixed(1)}%`} color={detalhe.resumo.taxaPoupanca >= 20 ? '#10b981' : '#f59e0b'} />
-          </div>
-
-          <div style={{ marginTop: '20px' }}>
-            <PainelAnual userId={detalhe.perfil.id} formatCurrency={formatCurrency} />
-          </div>
-
-          <div className="table-card" style={{ marginTop: '20px' }}>
-            <ObjetivosPage userId={detalhe.perfil.id} editavel formatCurrency={formatCurrency} />
-          </div>
-
-          <div style={{ marginTop: '20px' }}>
-            <ImportarExtratoPage userId={detalhe.perfil.id} editavel onImportado={() => fetchApi(`/admin/usuarios/${detalhe.perfil.id}`).then(setDetalhe)} />
-          </div>
-
-          <div className="dashboard-grid-modern" style={{ marginTop: '20px' }}>
-            <div className="chart-card">
-              <div className="card-header-flex">
-                <h3>📊 Despesas por Categoria</h3>
-                <span className="badge-count">{detalhe.categorias.length} categorias</span>
-              </div>
-              {detalhe.categorias.length === 0 ? (
-                <div className="empty-state-box"><p>Nenhuma despesa categorizada.</p></div>
-              ) : (
-                <div className="bar-list">
-                  {detalhe.categorias.map(({ categoria, valor }) => {
-                    const percentual = detalhe.resumo.totalSaidas > 0 ? (valor / detalhe.resumo.totalSaidas) * 100 : 0;
-                    return (
-                      <div key={categoria} className="bar-item">
-                        <div className="bar-label">
-                          <span className="cat-name">{categoria}</span>
-                          <span className="cat-value" style={{ color: '#ef4444' }}>
-                            {formatCurrency(valor)} <small>({percentual.toFixed(1)}%)</small>
-                          </span>
-                        </div>
-                        <div className="bar-track">
-                          <div className="bar-fill" style={{ width: `${percentual}%` }}></div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="table-card" style={{ marginTop: '20px' }}>
-            <div className="card-header-flex" style={{ marginBottom: '16px' }}>
-              <h3>💳 Extrato Completo</h3>
-              <span className="badge-count">{detalhe.transacoes.length} transações</span>
-            </div>
-            <TransactionTable
-              transacoes={detalhe.transacoes}
-              loading={false}
-              userId={detalhe.perfil.id}
-              formatCurrency={formatCurrency}
-              getValorAjustado={getValorAjustado}
-            />
-          </div>
-        </>
+    <Card titulo="Clientes" icone="👥" semPadding acoes={<span className="tag">{filtrados.length} de {usuarios.length}</span>}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--borda)' }} className="filtros">
+        <input className="input input-busca filtro-largo" placeholder="Buscar por nome, e-mail, código (OUL-...) ou TAG" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar cliente" />
+        <select className="input" value={uf} onChange={(e) => setUf(e.target.value)} aria-label="Estado">
+          <option value="">Todos os estados</option>
+          {ufs.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </div>
+      {filtrados.length === 0 ? <Vazio icone="🔎" titulo="Nenhum cliente encontrado" texto="Ajuste a busca ou os filtros." /> : (
+        <div className="tabela-wrapper">
+          <table className="tabela">
+            <thead>
+              <tr><th>Cliente</th><th>Código</th><th>Perfil</th><th className="num">Saldo</th><th>Última movimentação</th><th /></tr>
+            </thead>
+            <tbody>
+              {filtrados.map((u) => (
+                <tr key={u.id} className="clicavel" onClick={() => onSelecionar(u.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelecionar(u.id)}>
+                  <td><strong>{u.nome}</strong><div className="texto-suave texto-pequeno">{u.email}{u.telefone ? ` · ${u.telefone}` : ''}</div></td>
+                  <td>{u.codigoCliente ? <span className="codigo-cliente" style={{ fontSize: 11 }}>{u.codigoCliente}</span> : '—'}</td>
+                  <td>
+                    <div className="tags">
+                      {u.estado && <span className="tag">{u.estado}</span>}
+                      {u.faixaEtaria && <span className="tag">{u.faixaEtaria}</span>}
+                      {(u.tags || []).slice(0, 2).map((t) => <span key={t} className="tag tag-extrato">{t}</span>)}
+                    </div>
+                  </td>
+                  <td className={`num ${u.saldoLiquido >= 0 ? 'positivo' : 'negativo'}`}>{fmt(u.saldoLiquido)}</td>
+                  <td>{u.ultimaTransacao ? formatarData(String(u.ultimaTransacao).slice(0, 10)) : <span className="texto-suave">sem dados</span>}</td>
+                  <td className="acoes"><span className="btn btn-secundario btn-pequeno">Abrir →</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </div>
+    </Card>
   );
 }

@@ -12,7 +12,15 @@ router.post('/vincular', requireAuth, sensitiveLimiter, async (req, res, next) =
   try {
     const userId = req.userId; // nunca de req.body
 
-    const codigo = crypto.randomInt(100000, 999999).toString();
+    // Garante um código que não esteja em uso por outra pessoa no momento
+    // (dois usuários com o mesmo código ativo tornariam o vínculo ambíguo).
+    let codigo;
+    for (let tentativa = 0; tentativa < 5; tentativa++) {
+      const candidato = crypto.randomInt(100000, 1000000).toString();
+      const { data: emUso } = await supabaseAdmin.from('vinculos_pendentes').select('codigo').eq('codigo', candidato).maybeSingle();
+      if (!emUso) { codigo = candidato; break; }
+    }
+    if (!codigo) throw new Error('Não foi possível gerar um código de vínculo único.');
     const expiraEm = new Date(Date.now() + EXPIRACAO_MINUTOS * 60 * 1000).toISOString();
 
     // Remove pendências anteriores deste usuário para evitar duplicidade ou conflito

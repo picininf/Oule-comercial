@@ -1,8 +1,8 @@
 {
   "name": "gestao-financeira-backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Backend seguro para o app de gestao financeira pessoal (Open Finance + WhatsApp IA)",
+  "description": "Backend do Oule | App — gestão financeira com planejador, Open Finance, importação de extratos e assistente no WhatsApp",
   "main": "server.js",
   "engines": {
     "node": ">=20"
@@ -10,7 +10,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "setup:webhook": "node scripts/setup-pluggy-webhook.js"
+    "check": "node scripts/verificar-sintaxe.js",
+    "setup:webhook": "node scripts/setup-pluggy-webhook.js",
+    "admin:criar": "node scripts/create-admin-user.js",
+    "normalizar:categorias": "node scripts/normalizar-categorias.js",
+    "sync:item": "node scripts/sincronizar-item.js",
+    "test": "node --import ./tests/setup.js --experimental-test-module-mocks --test tests/regras.test.js tests/plano.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

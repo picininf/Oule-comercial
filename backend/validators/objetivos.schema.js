@@ -35,13 +35,4 @@ export const objetivoUpdateSchema = z.object({
   status: z.enum(['em_andamento', 'concluido', 'cancelado']).optional(),
 }).refine((obj) => Object.keys(obj).length > 0, { message: 'Nada para atualizar.' });
 
-export function validarBody(schema) {
-  return (req, res, next) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Dados inválidos.', detalhes: result.error.flatten() });
-    }
-    req.body = result.data;
-    next();
-  };
-}
+export { validarBody } from './validate.js';

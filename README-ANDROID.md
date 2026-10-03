@@ -1,5 +1,13 @@
 # Gerando o app Android (Capacitor) — VSCode + PowerShell + Android Studio
 
+> **Novo nesta versão:** o app usa os plugins `@capacitor/filesystem` e
+> `@capacitor/share` para exportar relatórios (CSV, Excel, PDF, PNG). No
+> celular, o arquivo abre a folha de compartilhamento do Android (salvar no
+> Drive, enviar pelo WhatsApp etc.). Depois de `npm install`, rode sempre
+> `npm run android:sync` (ou `npx cap sync android`) para registrar os
+> plugins no projeto nativo. O `FileProvider` (`res/xml/file_paths.xml`) já
+> libera a pasta de cache usada pela exportação.
+
 Este projeto já vem com o Capacitor configurado (`frontend/capacitor.config.json`
 e a pasta `frontend/android`). O que estava impedindo o app de funcionar
 corretamente foi corrigido nesta versão:

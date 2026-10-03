@@ -5,7 +5,10 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
-import { analisarComprovante, calcularValorPelaCategoria } from './gemini.service.js';
+import { analisarComprovante } from './gemini.service.js';
+import { categoriaInfo, tipoGastoPadrao } from '../utils/categorias.js';
+import { formatarMoeda, hojeBrasil, mesDe, somarMeses } from '../utils/financeUtils.js';
+import { proximosVencimentos } from './pagamentos.service.js';
 
 const uploadsFolder = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadsFolder)) fs.mkdirSync(uploadsFolder, { recursive: true });
@@ -260,8 +263,15 @@ async function processarMensagem(sock, m) {
   const altJid = msg.key.remoteJidAlt;
   const altCleanId = altJid ? altJid.split(':')[0].replace('@s.whatsapp.net', '').replace('@lid', '').trim() : null;
 
-  if (captionText.toLowerCase().startsWith('!vincular')) {
+  const comando = captionText.toLowerCase();
+
+  if (comando.startsWith('!vincular')) {
     await tratarVinculacao(sock, from, cleanId, altCleanId, altJid, captionText);
+    return;
+  }
+
+  if (['!ajuda', '!contas', '!resumo'].includes(comando)) {
+    await tratarConsulta(sock, comando, from, [cleanId, from, altCleanId, altJid]);
     return;
   }
 
@@ -309,7 +319,7 @@ async function tratarVinculacao(sock, from, cleanId, altCleanId, altJid, caption
   // Insere um registro único e limpo garantindo que não quebre a constraint de user_id
   const { error: insertErr } = await supabaseAdmin
     .from('usuarios_whatsapp')
-    .insert({ user_id: vinculo.user_id, telefone: telefoneParaSalvar });
+    .insert({ user_id: vinculo.user_id, telefone: telefoneParaSalvar, jid: from });
 
   if (insertErr) {
     console.error('❌ Erro ao vincular:', insertErr.message);
@@ -321,7 +331,7 @@ async function tratarVinculacao(sock, from, cleanId, altCleanId, altJid, caption
   await supabaseAdmin.from('vinculos_pendentes').delete().eq('codigo', codigo);
 
   await sock.sendMessage(from, {
-    text: '✅ *WhatsApp vinculado com sucesso!*\n\nAgora você pode enviar a foto dos seus comprovantes com a legenda *!imagem*.',
+    text: '✅ *WhatsApp vinculado com sucesso!*\n\nAgora você pode enviar a foto dos seus comprovantes com a legenda *!imagem*.\n\nOutros comandos: *!contas* (vencimentos), *!resumo* (seu mês) e *!ajuda*.',
   });
 }
 
@@ -349,7 +359,8 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
     fs.writeFileSync(path.join(uploadsFolder, filename), buffer);
 
     const dados = await analisarComprovante(buffer, 'image/jpeg');
-    const valorFinal = calcularValorPelaCategoria(dados.categoria, dados.valor);
+    const ehReceita = categoriaInfo(dados.categoria).grupo === 'receita';
+    const valorFinal = ehReceita ? Math.abs(dados.valor) : -Math.abs(dados.valor);
 
     const { error: dbError } = await supabaseAdmin.from('transacoes').insert([
       {
@@ -360,7 +371,11 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
         categoria: dados.categoria,
         data_transacao: dados.data,
         image_url: `/uploads/${filename}`,
-        tipo: 'despesa',
+        tipo: ehReceita ? 'receita' : 'despesa',
+        tipo_gasto: ehReceita ? null : tipoGastoPadrao(dados.categoria),
+        data_competencia: dados.data,
+        data_caixa: dados.data,
+        origem: 'whatsapp',
       },
     ]);
 
@@ -371,10 +386,126 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
     }
 
     await sock.sendMessage(from, {
-      text: `✅ *Comprovante processado!*\n\n🏢 *Local:* ${dados.estabelecimento}\n💰 *Valor:* R$ ${Math.abs(valorFinal).toFixed(2)}\n📂 *Categoria:* ${dados.categoria}\n\n_Lançamento gravado no painel._`,
+      text: `✅ *Comprovante processado!*\n\n🏢 *Local:* ${dados.estabelecimento}\n💰 *Valor:* ${formatarMoeda(Math.abs(valorFinal))}\n📂 *Categoria:* ${dados.categoria}\n\n_Lançamento gravado no painel._`,
     });
   } catch (err) {
     console.error('❌ Erro no processamento do comprovante:', err.message);
     await sock.sendMessage(from, { text: '❌ Não foi possível ler o comprovante agora. Tente novamente.' });
+  }
+}
+
+/* -------------------------------------------------------------------------
+   CONSULTAS PELO WHATSAPP (!contas, !resumo, !ajuda)
+   ------------------------------------------------------------------------- */
+
+async function usuarioDoRemetente(ids) {
+  const { data } = await supabaseAdmin
+    .from('usuarios_whatsapp')
+    .select('user_id')
+    .in('telefone', [...new Set(ids.filter(Boolean))])
+    .limit(1);
+  return data?.[0]?.user_id || null;
+}
+
+const ROTULO_STATUS = {
+  atrasado: '🔴 atrasada',
+  vence_hoje: '🟠 vence HOJE',
+  vence_em_breve: '🟡 vence em breve',
+  pendente: '⚪ a vencer',
+};
+
+async function tratarConsulta(sock, comando, from, ids) {
+  if (comando === '!ajuda') {
+    await sock.sendMessage(from, {
+      text:
+        '🤖 *Comandos do assistente Oule*\n\n' +
+        '📷 *!imagem* — envie a foto do comprovante com esta legenda\n' +
+        '🧾 *!contas* — contas a vencer nos próximos dias\n' +
+        '📊 *!resumo* — entradas e saídas do mês\n' +
+        '🔗 *!vincular CODIGO* — vincula este número à sua conta',
+    });
+    return;
+  }
+
+  const userId = await usuarioDoRemetente(ids);
+  if (!userId) {
+    await sock.sendMessage(from, { text: '⚠️ Número não vinculado. Gere um código no app e envie *!vincular CODIGO*.' });
+    return;
+  }
+
+  if (comando === '!contas') {
+    const contas = await proximosVencimentos(userId, { dias: 10 });
+    const texto = contas.length === 0
+      ? '✅ Nenhuma conta pendente para os próximos 10 dias.'
+      : '🧾 *Suas próximas contas*\n\n' +
+        contas
+          .slice(0, 15)
+          .map((c) => `• ${c.descricao} — ${formatarMoeda(c.valor)} — ${c.vencimento.split('-').reverse().join('/')} (${ROTULO_STATUS[c.status] || c.status})`)
+          .join('\n');
+    await sock.sendMessage(from, { text: texto });
+    return;
+  }
+
+  if (comando === '!resumo') {
+    const mes = mesDe(hojeBrasil());
+    const { data } = await supabaseAdmin
+      .from('transacoes')
+      .select('valor, categoria')
+      .eq('user_id', userId)
+      .gte('data_competencia', `${mes}-01`)
+      .lt('data_competencia', `${somarMeses(mes, 1)}-01`);
+    let entradas = 0;
+    let saidas = 0;
+    const porCategoria = {};
+    for (const t of data || []) {
+      if (t.categoria === 'Transferências') continue;
+      const v = Number(t.valor) || 0;
+      if (v > 0) entradas += v;
+      else {
+        saidas += -v;
+        porCategoria[t.categoria] = (porCategoria[t.categoria] || 0) + -v;
+      }
+    }
+    const top = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    await sock.sendMessage(from, {
+      text:
+        `📊 *Resumo de ${mes.split('-').reverse().join('/')}*\n\n` +
+        `📥 Entradas: ${formatarMoeda(entradas)}\n📤 Saídas: ${formatarMoeda(saidas)}\n💰 Saldo: ${formatarMoeda(entradas - saidas)}` +
+        (top.length ? `\n\nMaiores gastos:\n${top.map(([c, v]) => `• ${c}: ${formatarMoeda(v)}`).join('\n')}` : ''),
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------
+   ENVIO ATIVO (lembretes de vencimento)
+   ------------------------------------------------------------------------- */
+
+export function whatsappConectado() {
+  return estado.status === 'conectado' && Boolean(sock);
+}
+
+/**
+ * Envia uma mensagem para o WhatsApp vinculado a um usuário. Devolve
+ * false (sem lançar erro) quando o bot está offline ou a pessoa não
+ * vinculou um número — o lembrete simplesmente não é enviado.
+ */
+export async function enviarMensagemParaUsuario(userId, texto) {
+  if (!whatsappConectado()) return false;
+  const { data } = await supabaseAdmin
+    .from('usuarios_whatsapp')
+    .select('telefone, jid')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!data) return false;
+
+  const destino = data.jid || (/^\d{8,15}$/.test(data.telefone || '') ? `${data.telefone}@s.whatsapp.net` : null);
+  if (!destino) return false;
+
+  try {
+    await sock.sendMessage(destino, { text: texto });
+    return true;
+  } catch (err) {
+    console.error('❌ Falha ao enviar lembrete pelo WhatsApp:', err.message);
+    return false;
   }
 }

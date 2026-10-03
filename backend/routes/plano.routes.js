@@ -1,228 +1,288 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, attachProfile } from '../middleware/auth.js';
+import { autenticado } from '../middleware/auth.js';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 import { resolverUsuarioAlvo } from '../utils/acesso.js';
-import { getValorAjustado } from '../utils/financeUtils.js';
+import { httpError } from '../utils/http.js';
+import { hojeBrasil, idadeEmAnos } from '../utils/financeUtils.js';
+import { validar } from '../validators/validate.js';
+import { CATEGORIA_IDS } from '../utils/categorias.js';
+import { montarPainel, sugerirOrcamento, premissasParaApi } from '../services/plano.service.js';
+import { projetarFuturo, aposentadoriaParaApi, calcularAposentadoria } from '../services/projecao.service.js';
 
 const router = Router();
+router.use(autenticado);
 
-router.use(requireAuth, attachProfile);
+const mesSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mês inválido (use AAAA-MM).');
+const anoAtual = () => Number(hojeBrasil().slice(0, 4));
 
-const NOMES_MES = [
-  'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
-];
-
-function mesChave(ano, indiceZeroBased) {
-  return `${ano}-${String(indiceZeroBased + 1).padStart(2, '0')}`;
+function anoValido(valor) {
+  const ano = Number(valor || anoAtual());
+  if (!Number.isInteger(ano) || ano < 2000 || ano > anoAtual() + 30) throw httpError(400, 'Ano inválido.');
+  return ano;
 }
 
 /**
- * GET /api/plano/painel?ano=2026&userId=...
- *
- * Monta a "linha do tempo" do ano: para cada um dos 12 meses, calcula
- * o que realmente aconteceu (entradas/saídas via `transacoes`) e
- * compara com o que foi planejado (`plano_mensal`). Gera alertas
- * simples e diretos sobre onde a pessoa deve segurar os gastos.
+ * GET /api/plano/painel?ano=2027&regime=competencia|caixa&userId=
+ * Linha do tempo do ano (passado, atual ou FUTURO) + conclusões.
  */
 router.get('/painel', async (req, res, next) => {
   try {
-    const alvoUserId = await resolverUsuarioAlvo(req, req.query.userId);
-    const ano = String(req.query.ano || new Date().getFullYear());
-
-    const inicio = `${ano}-01-01`;
-    const fim = `${Number(ano) + 1}-01-01`;
-
-    const [{ data: transacoes, error: erroTransacoes }, { data: plano, error: erroPlano }] = await Promise.all([
-      supabaseAdmin
-        .from('transacoes')
-        .select('valor, tipo, categoria, data_transacao')
-        .eq('user_id', alvoUserId)
-        .gte('data_transacao', inicio)
-        .lt('data_transacao', fim),
-      supabaseAdmin
-        .from('plano_mensal')
-        .select('mes, categoria, valor_planejado')
-        .eq('user_id', alvoUserId)
-        .like('mes', `${ano}-%`),
-    ]);
-    if (erroTransacoes) throw erroTransacoes;
-    if (erroPlano) throw erroPlano;
-
-    // Agrega o realizado por mês e por categoria (só saídas contam
-    // para orçamento por categoria).
-    const meses = Array.from({ length: 12 }, (_, i) => {
-      const mes = mesChave(ano, i);
-      return {
-        mes,
-        label: NOMES_MES[i],
-        entradas: 0,
-        saidas: 0,
-        saldo: 0,
-        planejadoTotal: 0,
-        categorias: {},
-      };
-    });
-    const mesPorChave = new Map(meses.map((m) => [m.mes, m]));
-
-    for (const t of transacoes || []) {
-      const chave = String(t.data_transacao).slice(0, 7);
-      const registro = mesPorChave.get(chave);
-      if (!registro) continue;
-
-      const valor = getValorAjustado(t);
-      const cat = t.categoria || 'Outros';
-
-      if (valor > 0) {
-        registro.entradas += valor;
-      } else {
-        const abs = Math.abs(valor);
-        registro.saidas += abs;
-        registro.categorias[cat] = registro.categorias[cat] || { categoria: cat, real: 0, planejado: 0 };
-        registro.categorias[cat].real += abs;
-      }
-    }
-
-    for (const p of plano || []) {
-      const registro = mesPorChave.get(p.mes);
-      if (!registro) continue;
-      const cat = p.categoria || 'Outros';
-      registro.planejadoTotal += Number(p.valor_planejado) || 0;
-      registro.categorias[cat] = registro.categorias[cat] || { categoria: cat, real: 0, planejado: 0 };
-      registro.categorias[cat].planejado += Number(p.valor_planejado) || 0;
-    }
-
-    // Gera as métricas finais + alertas, mês a mês, comparando também
-    // com o mês anterior.
-    let saldoMesAnterior = null;
-    const mesAtualChave = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-
-    const resultado = meses.map((m) => {
-      m.saldo = m.entradas - m.saidas;
-      const categorias = Object.values(m.categorias).sort((a, b) => b.real - a.real);
-
-      const alertas = [];
-      const temMovimento = m.entradas > 0 || m.saidas > 0;
-
-      if (temMovimento && m.saldo < 0) {
-        const piorCategoria = categorias[0];
-        alertas.push(
-          piorCategoria
-            ? `Mês ficou negativo (${formatarMoeda(m.saldo)}). Maior vilão: ${piorCategoria.categoria} (${formatarMoeda(piorCategoria.real)}). Vale reduzir aqui no próximo mês.`
-            : `Mês ficou negativo (${formatarMoeda(m.saldo)}). Reveja os gastos para equilibrar o próximo mês.`
-        );
-      }
-
-      if (temMovimento && saldoMesAnterior !== null && saldoMesAnterior >= 0 && m.saldo < saldoMesAnterior - 0.01) {
-        alertas.push(`Sobrou menos que no mês anterior (${formatarMoeda(saldoMesAnterior)} → ${formatarMoeda(m.saldo)}). Fique de olho no ritmo de gastos.`);
-      }
-
-      for (const c of categorias) {
-        if (c.planejado > 0 && c.real > c.planejado) {
-          const excesso = ((c.real / c.planejado) - 1) * 100;
-          alertas.push(`${c.categoria} passou do planejado em ${excesso.toFixed(0)}% (${formatarMoeda(c.real)} de ${formatarMoeda(c.planejado)} previstos).`);
-        }
-      }
-
-      if (temMovimento) saldoMesAnterior = m.saldo;
-
-      return {
-        mes: m.mes,
-        label: m.label,
-        ehMesAtual: m.mes === mesAtualChave,
-        temMovimento,
-        entradas: m.entradas,
-        saidas: m.saidas,
-        saldo: m.saldo,
-        planejadoTotal: m.planejadoTotal,
-        categorias,
-        alertas,
-      };
-    });
-
-    res.json({ ano: Number(ano), meses: resultado });
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const regime = req.query.regime === 'caixa' ? 'caixa' : 'competencia';
+    res.json(await montarPainel(alvo, { ano: anoValido(req.query.ano), regime }));
   } catch (err) {
     next(err);
   }
 });
 
-function formatarMoeda(valor) {
-  return `R$ ${Number(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-/**
- * GET /api/plano/orcamento?mes=2026-03&userId=...
- * Lista o orçamento planejado (por categoria) de um mês específico,
- * para edição.
- */
+/** GET /api/plano/orcamento?mes=AAAA-MM&userId= */
 router.get('/orcamento', async (req, res, next) => {
   try {
-    const alvoUserId = await resolverUsuarioAlvo(req, req.query.userId);
-    const mes = String(req.query.mes || '');
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) {
-      return res.status(400).json({ error: 'Informe o mês no formato AAAA-MM.' });
-    }
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const mes = mesSchema.safeParse(String(req.query.mes || ''));
+    if (!mes.success) throw httpError(400, 'Informe o mês no formato AAAA-MM.');
 
     const { data, error } = await supabaseAdmin
       .from('plano_mensal')
       .select('id, categoria, valor_planejado')
-      .eq('user_id', alvoUserId)
-      .eq('mes', mes)
+      .eq('user_id', alvo)
+      .eq('mes', mes.data)
       .order('categoria', { ascending: true });
     if (error) throw error;
-
     res.json((data || []).map((r) => ({ id: r.id, categoria: r.categoria, valorPlanejado: Number(r.valor_planejado) })));
   } catch (err) {
     next(err);
   }
 });
 
+const itensSchema = z
+  .array(
+    z.object({
+      categoria: z.enum(CATEGORIA_IDS, { errorMap: () => ({ message: 'Categoria inválida no orçamento.' }) }),
+      valorPlanejado: z.coerce.number().finite().min(0).max(100_000_000),
+    })
+  )
+  .max(60);
+
 const orcamentoSchema = z.object({
   userId: z.string().uuid().optional(),
-  mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mês inválido (use AAAA-MM).'),
-  itens: z
-    .array(
-      z.object({
-        categoria: z.string().trim().min(1).max(60),
-        valorPlanejado: z.coerce.number().finite().min(0).max(100_000_000),
-      })
-    )
-    .max(50),
+  mes: mesSchema,
+  itens: itensSchema,
+});
+
+async function gravarOrcamento(userId, mes, itens) {
+  const { error: erroDelete } = await supabaseAdmin.from('plano_mensal').delete().eq('user_id', userId).eq('mes', mes);
+  if (erroDelete) throw erroDelete;
+
+  // Soma itens repetidos da mesma categoria (evita violar o índice único).
+  const porCategoria = new Map();
+  for (const i of itens) {
+    if (i.valorPlanejado > 0) porCategoria.set(i.categoria, (porCategoria.get(i.categoria) || 0) + i.valorPlanejado);
+  }
+  const linhas = [...porCategoria].map(([categoria, valor]) => ({ user_id: userId, mes, categoria, valor_planejado: valor }));
+  if (linhas.length > 0) {
+    const { error } = await supabaseAdmin.from('plano_mensal').insert(linhas);
+    if (error) throw error;
+  }
+}
+
+/** PUT /api/plano/orcamento — substitui o orçamento (receitas + despesas) do mês. */
+router.put('/orcamento', validar(orcamentoSchema), async (req, res, next) => {
+  try {
+    const alvo = await resolverUsuarioAlvo(req, req.body.userId);
+    await gravarOrcamento(alvo, req.body.mes, req.body.itens);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const copiarSchema = z.object({
+  userId: z.string().uuid().optional(),
+  origem: mesSchema,
+  destinos: z.array(mesSchema).min(1).max(36),
+  // Reajuste aplicado a cada mês de destino (ex.: 4.5 = +4,5%).
+  reajustePct: z.coerce.number().min(-50).max(100).default(0),
+  sobrescrever: z.boolean().default(true),
 });
 
 /**
- * PUT /api/plano/orcamento
- * Substitui por completo o orçamento planejado de um mês (mais simples
- * e previsível do que tentar fazer upsert linha a linha no frontend).
+ * POST /api/plano/orcamento/copiar
+ * Replica o orçamento de um mês para vários (ex.: "copiar janeiro para o
+ * resto do ano" ou "repetir este ano em 2027 com +5%").
  */
-router.put('/orcamento', async (req, res, next) => {
+router.post('/orcamento/copiar', validar(copiarSchema), async (req, res, next) => {
   try {
-    const result = orcamentoSchema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Dados inválidos.', detalhes: result.error.flatten() });
-    }
-    const { mes, itens } = result.data;
-    const alvoUserId = await resolverUsuarioAlvo(req, result.data.userId);
+    const { origem, destinos, reajustePct, sobrescrever } = req.body;
+    const alvo = await resolverUsuarioAlvo(req, req.body.userId);
 
-    const { error: erroDelete } = await supabaseAdmin
+    const { data: base, error } = await supabaseAdmin
       .from('plano_mensal')
-      .delete()
-      .eq('user_id', alvoUserId)
-      .eq('mes', mes);
-    if (erroDelete) throw erroDelete;
+      .select('categoria, valor_planejado')
+      .eq('user_id', alvo)
+      .eq('mes', origem);
+    if (error) throw error;
+    if (!base || base.length === 0) throw httpError(400, 'O mês de origem não tem orçamento para copiar.');
 
-    if (itens.length > 0) {
-      const linhas = itens
-        .filter((i) => i.valorPlanejado > 0)
-        .map((i) => ({ user_id: alvoUserId, mes, categoria: i.categoria, valor_planejado: i.valorPlanejado }));
+    const fator = 1 + reajustePct / 100;
+    const itens = base.map((b) => ({ categoria: b.categoria, valorPlanejado: Math.round(Number(b.valor_planejado) * fator * 100) / 100 }));
 
-      if (linhas.length > 0) {
-        const { error: erroInsert } = await supabaseAdmin.from('plano_mensal').insert(linhas);
-        if (erroInsert) throw erroInsert;
+    let copiados = 0;
+    for (const destino of [...new Set(destinos)].filter((d) => d !== origem)) {
+      if (!sobrescrever) {
+        const { count } = await supabaseAdmin
+          .from('plano_mensal')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', alvo)
+          .eq('mes', destino);
+        if (count > 0) continue;
       }
+      await gravarOrcamento(alvo, destino, itens);
+      copiados += 1;
     }
+    res.json({ ok: true, copiados });
+  } catch (err) {
+    next(err);
+  }
+});
 
-    res.json({ ok: true });
+/** GET /api/plano/orcamento/sugestao?meses=3&userId= — orçamento baseado na média real. */
+router.get('/orcamento/sugestao', async (req, res, next) => {
+  try {
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const meses = Math.min(Math.max(Number(req.query.meses) || 3, 1), 12);
+    res.json(await sugerirOrcamento(alvo, { meses }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/plano/premissas?ano=&userId= */
+router.get('/premissas', async (req, res, next) => {
+  try {
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const ano = anoValido(req.query.ano);
+    const { data, error } = await supabaseAdmin.from('plano_premissas').select('*').eq('user_id', alvo).eq('ano', ano).maybeSingle();
+    if (error) throw error;
+    res.json({ ano, ...premissasParaApi(data) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const premissasSchema = z.object({
+  userId: z.string().uuid().optional(),
+  ano: z.coerce.number().int().min(2000).max(2100),
+  inflacaoAnual: z.coerce.number().min(-5).max(50),
+  reajusteRendaAnual: z.coerce.number().min(-50).max(100),
+  metaPoupancaPct: z.coerce.number().min(0).max(90),
+  patrimonioInicial: z.coerce.number().min(0).max(1_000_000_000).nullable().optional(),
+  observacoes: z.string().trim().max(2000).optional().nullable(),
+});
+
+/** PUT /api/plano/premissas — hipóteses do ano (inflação, reajuste, meta de poupança...). */
+router.put('/premissas', validar(premissasSchema), async (req, res, next) => {
+  try {
+    const b = req.body;
+    const alvo = await resolverUsuarioAlvo(req, b.userId);
+    const { data, error } = await supabaseAdmin
+      .from('plano_premissas')
+      .upsert(
+        {
+          user_id: alvo,
+          ano: b.ano,
+          inflacao_anual: b.inflacaoAnual,
+          reajuste_renda_anual: b.reajusteRendaAnual,
+          meta_poupanca_pct: b.metaPoupancaPct,
+          patrimonio_inicial: b.patrimonioInicial ?? null,
+          observacoes: b.observacoes || null,
+          atualizado_por: req.userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,ano' }
+      )
+      .select('*')
+      .single();
+    if (error) throw error;
+    res.json({ ano: b.ano, ...premissasParaApi(data) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/plano/projecao?anos=10&aporteExtra=0&cortePct=0&userId=
+ * Visão de futuro + sonhos + aposentadoria, com simulador "e se?".
+ */
+router.get('/projecao', async (req, res, next) => {
+  try {
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const anos = Math.min(Math.max(Number(req.query.anos) || 10, 1), 40);
+    const aporteExtra = Math.min(Math.max(Number(req.query.aporteExtra) || 0, 0), 1_000_000);
+    const cortePct = Math.min(Math.max(Number(req.query.cortePct) || 0, 0), 90);
+    res.json(await projetarFuturo(alvo, { anos, aporteExtra, cortePct }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/plano/aposentadoria?userId= */
+router.get('/aposentadoria', async (req, res, next) => {
+  try {
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const [{ data, error }, { data: perfil }] = await Promise.all([
+      supabaseAdmin.from('aposentadoria_planos').select('*').eq('user_id', alvo).maybeSingle(),
+      supabaseAdmin.from('profiles').select('data_nascimento').eq('id', alvo).maybeSingle(),
+    ]);
+    if (error) throw error;
+    const config = aposentadoriaParaApi(data);
+    res.json({ config, resultado: calcularAposentadoria(config, idadeEmAnos(perfil?.data_nascimento)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const aposentadoriaSchema = z.object({
+  userId: z.string().uuid().optional(),
+  idadeAposentadoria: z.coerce.number().int().min(18).max(100),
+  rendaDesejada: z.coerce.number().min(0).max(10_000_000),
+  patrimonioAtual: z.coerce.number().min(0).max(1_000_000_000),
+  aporteMensal: z.coerce.number().min(0).max(10_000_000),
+  rentabilidadeRealAnual: z.coerce.number().min(-10).max(30),
+  taxaRetiradaAnual: z.coerce.number().min(1).max(15),
+  outrasRendas: z.coerce.number().min(0).max(10_000_000).default(0),
+});
+
+/** PUT /api/plano/aposentadoria */
+router.put('/aposentadoria', validar(aposentadoriaSchema), async (req, res, next) => {
+  try {
+    const b = req.body;
+    const alvo = await resolverUsuarioAlvo(req, b.userId);
+    const { data, error } = await supabaseAdmin
+      .from('aposentadoria_planos')
+      .upsert(
+        {
+          user_id: alvo,
+          idade_aposentadoria: b.idadeAposentadoria,
+          renda_desejada: b.rendaDesejada,
+          patrimonio_atual: b.patrimonioAtual,
+          aporte_mensal: b.aporteMensal,
+          rentabilidade_real_anual: b.rentabilidadeRealAnual,
+          taxa_retirada_anual: b.taxaRetiradaAnual,
+          outras_rendas: b.outrasRendas,
+          atualizado_por: req.userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      )
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    const { data: perfil } = await supabaseAdmin.from('profiles').select('data_nascimento').eq('id', alvo).maybeSingle();
+    const config = aposentadoriaParaApi(data);
+    res.json({ config, resultado: calcularAposentadoria(config, idadeEmAnos(perfil?.data_nascimento)) });
   } catch (err) {
     next(err);
   }

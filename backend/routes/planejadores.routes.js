@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, attachProfile, requireOule, ADMIN_EMAIL, papelValido } from '../middleware/auth.js';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
+import { exigirUuid } from '../utils/http.js';
 
 const router = Router();
 
@@ -43,7 +44,7 @@ router.get('/', async (req, res, next) => {
     // Garante que todo mundo (mesmo sem linha em `profiles` ainda)
     // apareça na lista, com papel padrão 'cliente'.
     const pessoas = authUsers
-      .filter((u) => (u.email || '').toLowerCase() !== ADMIN_EMAIL)
+      .filter((u) => !ADMIN_EMAIL || (u.email || '').toLowerCase() !== ADMIN_EMAIL)
       .map((u) => {
         const perfil = perfilPorId.get(u.id);
         return {
@@ -86,7 +87,7 @@ const papelSchema = z.object({
  * Rebaixar um planejador para cliente desvincula automaticamente os
  * clientes dele (fica sem planejador, precisa ser reatribuído).
  */
-router.patch('/usuarios/:userId/papel', async (req, res, next) => {
+router.patch('/usuarios/:userId/papel', exigirUuid('userId'), async (req, res, next) => {
   try {
     const { userId } = req.params;
     const result = papelSchema.safeParse(req.body);
@@ -134,7 +135,7 @@ const vinculoSchema = z.object({
  * Atribui (ou remove, com planejadorId = null) o planejador
  * responsável por um cliente.
  */
-router.patch('/clientes/:clienteId/vinculo', async (req, res, next) => {
+router.patch('/clientes/:clienteId/vinculo', exigirUuid('clienteId'), async (req, res, next) => {
   try {
     const { clienteId } = req.params;
     const result = vinculoSchema.safeParse(req.body);

@@ -1,13 +1,25 @@
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 
-// E-mail da conta de administrador "raiz". Configurável via .env; se não
-// definido, cai no valor padrão combinado com o usuário. Esse e-mail
-// sempre é tratado como papel 'oule' (admin), mesmo que a linha em
-// `profiles` diga outra coisa — é uma trava de segurança extra que não
-// depende do banco.
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'admin@gmail.com').trim().toLowerCase();
+// E-mail da conta de administrador "raiz" (ADMIN_EMAIL no .env). Esse
+// e-mail sempre é tratado como papel 'oule' (admin), mesmo que a linha em
+// `profiles` diga outra coisa.
+//
+// SEGURANÇA: não existe mais valor padrão. Antes, sem ADMIN_EMAIL, o
+// sistema assumia "admin@gmail.com" — qualquer pessoa que criasse uma
+// conta com esse e-mail virava administrador, com acesso aos dados
+// financeiros de TODOS os usuários. Agora o e-mail também só é aceito
+// como admin depois de CONFIRMADO no Supabase Auth.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+if (!ADMIN_EMAIL) {
+  console.warn('⚠️ ADMIN_EMAIL não definido: nenhuma conta será promovida a admin automaticamente.');
+}
 
 const PAPEIS_VALIDOS = new Set(['oule', 'planejador', 'cliente']);
+
+// Só as colunas que existem desde a v2 do schema. Os dados de cadastro
+// completos (v4) são lidos pela rota /api/perfil — assim, se a migração
+// nova ainda não foi rodada, o login continua funcionando.
+const COLUNAS_PERFIL = 'id, nome, telefone, banco_conectado, role, planejador_id';
 
 /**
  * Middleware de autenticacao.
@@ -25,7 +37,7 @@ export async function requireAuth(req, res, next) {
     }
 
     const token = authHeader.slice('Bearer '.length).trim();
-    if (!token) {
+    if (!token || token.length > 4096) {
       return res.status(401).json({ error: 'Token de acesso inválido.' });
     }
 
@@ -35,12 +47,17 @@ export async function requireAuth(req, res, next) {
     }
 
     req.userId = data.user.id;
-    req.userEmail = data.user.email;
+    req.userEmail = data.user.email || '';
+    req.userEmailConfirmado = Boolean(data.user.email_confirmed_at || data.user.confirmed_at);
     next();
   } catch (err) {
     console.error('Erro no middleware de autenticação:', err);
     return res.status(401).json({ error: 'Não foi possível validar sua sessão.' });
   }
+}
+
+function ehAdminRaiz(userEmail, emailConfirmado) {
+  return Boolean(ADMIN_EMAIL) && emailConfirmado && (userEmail || '').trim().toLowerCase() === ADMIN_EMAIL;
 }
 
 /**
@@ -50,41 +67,36 @@ export async function requireAuth(req, res, next) {
  * com o papel padrão 'cliente' (ou 'oule' se o e-mail bater com
  * ADMIN_EMAIL) na primeira requisição autenticada dele.
  */
-export async function carregarOuCriarPerfil(userId, userEmail) {
+export async function carregarOuCriarPerfil(userId, userEmail, emailConfirmado = false) {
   const { data: existente, error: erroSelect } = await supabaseAdmin
     .from('profiles')
-    .select('id, nome, telefone, banco_conectado, role, planejador_id')
+    .select(COLUNAS_PERFIL)
     .eq('id', userId)
     .maybeSingle();
 
   if (erroSelect) throw erroSelect;
 
-  const ehAdminRaiz = (userEmail || '').trim().toLowerCase() === ADMIN_EMAIL;
+  const admin = ehAdminRaiz(userEmail, emailConfirmado);
 
   if (existente) {
     // O e-mail-admin raiz sempre é forçado para 'oule', mesmo que a
     // linha no banco tenha ficado desatualizada.
-    if (ehAdminRaiz && existente.role !== 'oule') {
+    if (admin && existente.role !== 'oule') {
       const { data: atualizado } = await supabaseAdmin
         .from('profiles')
         .update({ role: 'oule' })
         .eq('id', userId)
-        .select('id, nome, telefone, banco_conectado, role, planejador_id')
+        .select(COLUNAS_PERFIL)
         .single();
       return atualizado || { ...existente, role: 'oule' };
     }
     return existente;
   }
 
-  const novoPerfil = {
-    id: userId,
-    role: ehAdminRaiz ? 'oule' : 'cliente',
-  };
-
   const { data: criado, error: erroInsert } = await supabaseAdmin
     .from('profiles')
-    .insert(novoPerfil)
-    .select('id, nome, telefone, banco_conectado, role, planejador_id')
+    .insert({ id: userId, role: admin ? 'oule' : 'cliente' })
+    .select(COLUNAS_PERFIL)
     .single();
 
   // Corrida rara: duas requisições simultâneas tentando criar o mesmo
@@ -92,7 +104,7 @@ export async function carregarOuCriarPerfil(userId, userEmail) {
   if (erroInsert) {
     const { data: releitura } = await supabaseAdmin
       .from('profiles')
-      .select('id, nome, telefone, banco_conectado, role, planejador_id')
+      .select(COLUNAS_PERFIL)
       .eq('id', userId)
       .maybeSingle();
     if (releitura) return releitura;
@@ -109,9 +121,9 @@ export async function carregarOuCriarPerfil(userId, userEmail) {
  */
 export async function attachProfile(req, res, next) {
   try {
-    const perfil = await carregarOuCriarPerfil(req.userId, req.userEmail);
+    const perfil = await carregarOuCriarPerfil(req.userId, req.userEmail, req.userEmailConfirmado);
     req.profile = {
-      role: perfil.role,
+      role: PAPEIS_VALIDOS.has(perfil.role) ? perfil.role : 'cliente',
       planejadorId: perfil.planejador_id || null,
       nome: perfil.nome || null,
       telefone: perfil.telefone || null,
@@ -126,9 +138,7 @@ export async function attachProfile(req, res, next) {
 
 /**
  * Middleware de autorização de administrador (papel 'oule').
- *
- * IMPORTANTE: deve ser usado SEMPRE depois de `requireAuth` +
- * `attachProfile` na cadeia de middlewares.
+ * Deve ser usado SEMPRE depois de `requireAuth` + `attachProfile`.
  */
 export function requireOule(req, res, next) {
   if (req.profile?.role !== 'oule') {
@@ -138,10 +148,9 @@ export function requireOule(req, res, next) {
 }
 
 /**
- * Middleware que libera acesso para papéis "staff" (oule OU
- * planejador). Os handlers são responsáveis por filtrar os dados de
- * acordo com `req.profile.role` (planejador só vê os próprios
- * clientes; oule vê todos).
+ * Libera acesso para papéis "staff" (oule OU planejador). Os handlers
+ * filtram os dados de acordo com `req.profile.role` (planejador só vê
+ * os próprios clientes; oule vê todos).
  */
 export function requireStaff(req, res, next) {
   if (req.profile?.role !== 'oule' && req.profile?.role !== 'planejador') {
@@ -150,11 +159,11 @@ export function requireStaff(req, res, next) {
   next();
 }
 
-/**
- * Mantido por compatibilidade: alguns pontos antigos do código ainda
- * podem importar `requireAdmin`. Equivalente a `requireOule`.
- */
+/** Mantido por compatibilidade: equivalente a `requireOule`. */
 export const requireAdmin = requireOule;
+
+/** Cadeia padrão das rotas autenticadas: token válido + perfil carregado. */
+export const autenticado = [requireAuth, attachProfile];
 
 export function papelValido(valor) {
   return PAPEIS_VALIDOS.has(valor);
