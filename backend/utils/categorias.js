@@ -105,7 +105,7 @@ const REGRAS = [
   // PIX/TED/DOC genérico: pode ser renda (cliente pagando) ou gasto
   // (pagando alguém). Decidido pelo sinal em normalizarCategoria().
   [/transfer|\btransf\b|\bted\b|\bdoc\b|\bpix\b|mercado ?pago|picpay/, TRANSFERENCIA_GENERICA],
-  [/invest|fixed income|variable income|mutual fund|tesouro|\bcdb\b|\blci\b|\blca\b|corretora|previdencia privada/, 'Investimentos'],
+  [/invest|fixed income|variable income|mutual fund|tesouro|\bcdb\b|\brdb\b|\blci\b|\blca\b|corretora|previdencia privada/, 'Investimentos'],
   [/\bloans?\b|financing|financiamento|emprestimo|consignado|interests? charged|juros|late payment|encargos|iof atraso|cheque especial/, 'Dívidas e Empréstimos'],
   [/\btax(es)?\b|income tax|imposto|iptu|ipva|darf|tarifa governamental|multa de transito|licenciamento|cartorio/, 'Impostos e Taxas'],
   [/insurance|seguro/, 'Seguros'],

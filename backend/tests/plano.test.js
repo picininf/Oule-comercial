@@ -82,6 +82,10 @@ test('regime de caixa: parcelas comprometidas nos meses das faturas', async () =
   const comp = await montarPainel(U, { ano: anoAtual, regime: 'competencia' });
   const atual = comp.meses.find((m) => m.mes === mesAtual);
   assert.equal(atual.saidas, 600);
+  // Há compra no cartão paga em outro mês: os regimes diferem.
+  assert.equal(comp.regimesIguais, false);
+  // Ano futuro sem lançamentos: competência = caixa (a tela avisa).
+  assert.equal((await montarPainel(U, { ano: proximoAno + 1, regime: 'caixa' })).regimesIguais, true);
 });
 
 test('ano futuro: usa o plano e aponta plano otimista', async () => {

@@ -9,6 +9,7 @@ import { httpError } from '../utils/http.js';
 import { analisarExtratoBancario } from '../services/gemini.service.js';
 import { lerPlanilha, ehPlanilha } from '../services/planilha.service.js';
 import { carregarCartao, montarLinhas } from '../services/lancamentos.service.js';
+import { aplicarRegras } from '../services/regras.service.js';
 import { validar } from '../validators/validate.js';
 import { extratoConfigSchema, extratoImportarBodySchema } from '../validators/extrato.schema.js';
 
@@ -226,6 +227,10 @@ router.post(
 
       const linhasNovas = linhas.filter((l) => !hashesExistentes.has(l.extrato_hash));
       const quantidadeDuplicadas = linhas.length - linhasNovas.length;
+      // Regras do cliente ("todo Pix para Fulano é Brownie"). O hash acima
+      // usa a descrição do banco, então reenviar o arquivo continua
+      // deduplicando mesmo com o lançamento renomeado.
+      await aplicarRegras(alvoUserId, linhasNovas);
 
       for (let i = 0; i < linhasNovas.length; i += 200) {
         const { error } = await supabaseAdmin.from('transacoes').insert(linhasNovas.slice(i, i + 200));

@@ -15,7 +15,7 @@
     "admin:criar": "node scripts/create-admin-user.js",
     "normalizar:categorias": "node scripts/normalizar-categorias.js",
     "sync:item": "node scripts/sincronizar-item.js",
-    "test": "node --import ./tests/setup.js --experimental-test-module-mocks --test tests/regras.test.js tests/plano.test.js"
+    "test": "node --import ./tests/setup.js --experimental-test-module-mocks --test tests/regras.test.js tests/plano.test.js tests/regrasCliente.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

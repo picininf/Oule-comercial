@@ -6,8 +6,9 @@ import fs from 'fs';
 import path from 'path';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 import { analisarComprovante } from './gemini.service.js';
-import { categoriaInfo, tipoGastoPadrao } from '../utils/categorias.js';
-import { formatarMoeda, hojeBrasil, mesDe, somarMeses } from '../utils/financeUtils.js';
+import { categoriaInfo, tipoGastoPadrao, normalizarCategoria } from '../utils/categorias.js';
+import { formatarMoeda, hojeBrasil, mesDe, somarMeses, getValorAjustado, ehTransferencia } from '../utils/financeUtils.js';
+import { aplicarRegras } from './regras.service.js';
 import { proximosVencimentos } from './pagamentos.service.js';
 
 const uploadsFolder = path.join(process.cwd(), 'uploads');
@@ -270,8 +271,9 @@ async function processarMensagem(sock, m) {
     return;
   }
 
-  if (['!ajuda', '!contas', '!resumo'].includes(comando)) {
-    await tratarConsulta(sock, comando, from, [cleanId, from, altCleanId, altJid]);
+  const [nomeComando, ...argumentos] = comando.split(/\s+/);
+  if (['!ajuda', '!contas', '!resumo'].includes(nomeComando)) {
+    await tratarConsulta(sock, nomeComando, from, [cleanId, from, altCleanId, altJid], argumentos.join(' '));
     return;
   }
 
@@ -359,25 +361,32 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
     fs.writeFileSync(path.join(uploadsFolder, filename), buffer);
 
     const dados = await analisarComprovante(buffer, 'image/jpeg');
-    const ehReceita = categoriaInfo(dados.categoria).grupo === 'receita';
+    // Comprovante enviado pelo cliente é pagamento a alguém. "Transferências"
+    // é só para dinheiro entre contas da própria pessoa — se a IA marcar
+    // assim um Pix para terceiros, o gasto sumiria dos totais e do !resumo.
+    const categoria = dados.categoria === 'Transferências'
+      ? normalizarCategoria(null, dados.estabelecimento, -Math.abs(dados.valor))
+      : dados.categoria;
+    const ehReceita = categoriaInfo(categoria).grupo === 'receita';
     const valorFinal = ehReceita ? Math.abs(dados.valor) : -Math.abs(dados.valor);
 
-    const { error: dbError } = await supabaseAdmin.from('transacoes').insert([
+    const [linha] = await aplicarRegras(targetUserId, [
       {
         user_id: targetUserId,
         descricao: dados.estabelecimento,
         valor: valorFinal,
         metodo_pagamento: dados.metodo_pagamento,
-        categoria: dados.categoria,
+        categoria,
         data_transacao: dados.data,
         image_url: `/uploads/${filename}`,
         tipo: ehReceita ? 'receita' : 'despesa',
-        tipo_gasto: ehReceita ? null : tipoGastoPadrao(dados.categoria),
+        tipo_gasto: ehReceita ? null : tipoGastoPadrao(categoria),
         data_competencia: dados.data,
         data_caixa: dados.data,
         origem: 'whatsapp',
       },
     ]);
+    const { error: dbError } = await supabaseAdmin.from('transacoes').insert([linha]);
 
     if (dbError) {
       console.error('❌ Erro ao gravar transação:', dbError.message);
@@ -386,7 +395,9 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
     }
 
     await sock.sendMessage(from, {
-      text: `✅ *Comprovante processado!*\n\n🏢 *Local:* ${dados.estabelecimento}\n💰 *Valor:* ${formatarMoeda(Math.abs(valorFinal))}\n📂 *Categoria:* ${dados.categoria}\n\n_Lançamento gravado no painel._`,
+      text: `✅ *Comprovante processado!*\n\n🏢 *Local:* ${linha.descricao}\n💰 *Valor:* ${formatarMoeda(Math.abs(valorFinal))}\n📂 *Categoria:* ${linha.categoria}` +
+        (linha.regra_id ? '\n📌 _Classificado pela sua regra._' : '') +
+        '\n\n_Lançamento gravado no painel._',
     });
   } catch (err) {
     console.error('❌ Erro no processamento do comprovante:', err.message);
@@ -414,14 +425,14 @@ const ROTULO_STATUS = {
   pendente: '⚪ a vencer',
 };
 
-async function tratarConsulta(sock, comando, from, ids) {
+async function tratarConsulta(sock, comando, from, ids, argumento = '') {
   if (comando === '!ajuda') {
     await sock.sendMessage(from, {
       text:
         '🤖 *Comandos do assistente Oule*\n\n' +
         '📷 *!imagem* — envie a foto do comprovante com esta legenda\n' +
         '🧾 *!contas* — contas a vencer nos próximos dias\n' +
-        '📊 *!resumo* — entradas e saídas do mês\n' +
+        '📊 *!resumo* — entradas e saídas do mês (*!resumo anterior* ou *!resumo 09/2026* para outro mês)\n' +
         '🔗 *!vincular CODIGO* — vincula este número à sua conta',
     });
     return;
@@ -447,33 +458,100 @@ async function tratarConsulta(sock, comando, from, ids) {
   }
 
   if (comando === '!resumo') {
-    const mes = mesDe(hojeBrasil());
-    const { data } = await supabaseAdmin
-      .from('transacoes')
-      .select('valor, categoria')
-      .eq('user_id', userId)
-      .gte('data_competencia', `${mes}-01`)
-      .lt('data_competencia', `${somarMeses(mes, 1)}-01`);
-    let entradas = 0;
-    let saidas = 0;
-    const porCategoria = {};
-    for (const t of data || []) {
-      if (t.categoria === 'Transferências') continue;
-      const v = Number(t.valor) || 0;
-      if (v > 0) entradas += v;
-      else {
-        saidas += -v;
-        porCategoria[t.categoria] = (porCategoria[t.categoria] || 0) + -v;
+    const mesHoje = mesDe(hojeBrasil());
+    const pedido = mesDoArgumento(argumento, mesHoje);
+    if (!pedido) {
+      await sock.sendMessage(from, { text: '⚠️ Não entendi o mês. Exemplos: *!resumo*, *!resumo anterior* ou *!resumo 09/2026*.' });
+      return;
+    }
+
+    let mes = pedido;
+    let resumo = await resumoDoMes(userId, mes);
+    let aviso = '';
+    // Começo de mês costuma estar vazio: em vez de responder "tudo zero",
+    // mostra o último mês com movimento (e avisa).
+    if (!argumento && resumo.lancamentos === 0) {
+      const ultimo = await ultimoMesComMovimento(userId, mes);
+      if (ultimo) {
+        aviso = `_Ainda não há lançamentos em ${rotuloMes(mes)}. Mostrando ${rotuloMes(ultimo)}._\n\n`;
+        mes = ultimo;
+        resumo = await resumoDoMes(userId, mes);
       }
     }
-    const top = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    await sock.sendMessage(from, {
-      text:
-        `📊 *Resumo de ${mes.split('-').reverse().join('/')}*\n\n` +
-        `📥 Entradas: ${formatarMoeda(entradas)}\n📤 Saídas: ${formatarMoeda(saidas)}\n💰 Saldo: ${formatarMoeda(entradas - saidas)}` +
-        (top.length ? `\n\nMaiores gastos:\n${top.map(([c, v]) => `• ${c}: ${formatarMoeda(v)}`).join('\n')}` : ''),
-    });
+
+    const top = Object.entries(resumo.porCategoria).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const texto = resumo.lancamentos === 0
+      ? `📊 *Resumo de ${rotuloMes(mes)}*\n\nNenhum lançamento neste mês ainda.`
+      : `📊 *Resumo de ${rotuloMes(mes)}*\n\n${aviso}` +
+        `📥 Entradas: ${formatarMoeda(resumo.entradas)}\n📤 Saídas: ${formatarMoeda(resumo.saidas)}\n💰 Saldo: ${formatarMoeda(resumo.entradas - resumo.saidas)}` +
+        (top.length ? `\n\n*Maiores gastos:*\n${top.map(([c, v]) => `${categoriaInfo(c).icone} ${c}: ${formatarMoeda(v)}`).join('\n')}` : '') +
+        `\n\n🧾 ${resumo.lancamentos} lançamento(s)` +
+        (resumo.transferencias ? ` · ${resumo.transferencias} transferência(s) entre contas não entram na conta` : '') +
+        `\n_Outro mês? Envie *!resumo anterior* ou *!resumo MM/AAAA*._`;
+    await sock.sendMessage(from, { text: texto });
   }
+}
+
+function rotuloMes(mes) {
+  return mes.split('-').reverse().join('/');
+}
+
+/** "" -> mês atual; "anterior"/"passado" -> mês passado; "9", "09/2026", "2026-09" -> esse mês. */
+function mesDoArgumento(argumento, mesHoje) {
+  const a = String(argumento || '').trim();
+  if (!a) return mesHoje;
+  if (/^(anterior|passado|ultimo|último)$/.test(a)) return somarMeses(mesHoje, -1);
+  let m = a.match(/^(\d{1,2})(?:[/-](\d{2}|\d{4}))?$/);
+  if (m) {
+    const mesNum = Number(m[1]);
+    if (mesNum < 1 || mesNum > 12) return null;
+    let ano = m[2] ? Number(m[2].length === 2 ? `20${m[2]}` : m[2]) : Number(mesHoje.slice(0, 4));
+    // "!resumo 11" em outubro = novembro do ano passado (não do futuro).
+    if (!m[2] && `${ano}-${String(mesNum).padStart(2, '0')}` > mesHoje) ano -= 1;
+    return `${ano}-${String(mesNum).padStart(2, '0')}`;
+  }
+  m = a.match(/^(\d{4})-(\d{1,2})$/);
+  if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return `${m[1]}-${m[2].padStart(2, '0')}`;
+  return null;
+}
+
+async function resumoDoMes(userId, mes) {
+  const { data, error } = await supabaseAdmin
+    .from('transacoes')
+    .select('valor, categoria, descricao, origem, open_finance_id')
+    .eq('user_id', userId)
+    .gte('data_competencia', `${mes}-01`)
+    .lt('data_competencia', `${somarMeses(mes, 1)}-01`);
+  if (error) throw error;
+
+  const r = { entradas: 0, saidas: 0, porCategoria: {}, lancamentos: (data || []).length, transferencias: 0 };
+  for (const t of data || []) {
+    if (ehTransferencia(t)) {
+      r.transferencias += 1;
+      continue;
+    }
+    const v = getValorAjustado(t);
+    if (v > 0) r.entradas += v;
+    else if (v < 0) {
+      r.saidas += -v;
+      const cat = t.categoria || 'Outros';
+      r.porCategoria[cat] = (r.porCategoria[cat] || 0) + -v;
+    }
+  }
+  return r;
+}
+
+async function ultimoMesComMovimento(userId, antesDe) {
+  const { data, error } = await supabaseAdmin
+    .from('transacoes')
+    .select('data_competencia')
+    .eq('user_id', userId)
+    .lt('data_competencia', `${antesDe}-01`)
+    .neq('categoria', 'Transferências')
+    .order('data_competencia', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0]?.data_competencia ? mesDe(data[0].data_competencia) : null;
 }
 
 /* -------------------------------------------------------------------------

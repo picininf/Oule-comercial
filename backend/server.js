@@ -25,6 +25,7 @@ const rotas = {
   cartoes: (await import('./routes/cartoes.routes.js')).default,
   pagamentos: (await import('./routes/pagamentos.routes.js')).default,
   analises: (await import('./routes/analises.routes.js')).default,
+  regras: (await import('./routes/regras.routes.js')).default,
 };
 
 const { conectarWhatsApp } = await import('./services/whatsapp.service.js');
@@ -65,6 +66,7 @@ app.use('/api/plano', rotas.plano);
 app.use('/api/cartoes', rotas.cartoes);
 app.use('/api/pagamentos', rotas.pagamentos);
 app.use('/api/analises', rotas.analises);
+app.use('/api/regras', rotas.regras);
 app.use('/api/admin/planejadores', rotas.planejadores);
 app.use('/api/admin', rotas.admin);
 

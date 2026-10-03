@@ -65,6 +65,9 @@ const PROMPT_COMPROVANTE = `Analise este comprovante de pagamento ou nota fiscal
   "categoria": "${LISTA_CATEGORIAS}",
   "metodo_pagamento": "Pix | Cartão | Boleto | Dinheiro"
 }
+Regras de categoria:
+- Pix, TED ou transferência para OUTRA pessoa ou empresa é um pagamento: escolha a categoria pelo que provavelmente foi pago (ou "Outros"), NUNCA "Transferências".
+- Use "Transferências" somente quando pagador e recebedor forem a MESMA pessoa (mesmo nome/CPF) ou for pagamento da fatura do próprio cartão.
 Responda APENAS o JSON bruto sem formatação Markdown extra. Não inclua nenhum texto fora do JSON.`;
 
 const PROMPT_EXTRATO = `Você é um leitor especializado em extratos bancários e faturas de cartão brasileiros (PDF ou foto/print). Extraia TODOS os lançamentos (débitos e créditos) visíveis no documento, ignorando saldo, cabeçalho, rodapé e totalizadores.

@@ -297,9 +297,17 @@ export async function montarPainel(userId, { ano, regime = 'competencia' }) {
     ano, meses: resultado, historico, premissas, objetivos: objetivos || [], anoAtual,
   });
 
+  // Competência e caixa só divergem em compras no cartão pagas em outro
+  // mês. Sem nenhuma no ano, os dois regimes dão exatamente os mesmos
+  // números — a tela avisa em vez de parecer que o botão não funciona.
+  const lancamentosEmOutroMes = [...transacoes, ...parcelasFuturas].filter(
+    (t) => mesDe(t.data_caixa || t.data_transacao) !== mesDe(t.data_competencia || t.data_transacao)
+  ).length;
+
   return {
     ano,
     regime,
+    regimesIguais: lancamentosEmOutroMes === 0,
     premissas,
     historico,
     meses: resultado,

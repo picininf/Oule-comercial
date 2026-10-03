@@ -116,6 +116,9 @@ export function criarSupabaseFalso(tabelas, { usuarios = [] } = {}) {
         return api;
       },
       in: (c, lista) => (filtros.push((r) => lista.includes(r[c])), api),
+      neq: (c, v) => (filtros.push((r) => r[c] !== v), api),
+      // Só o caso usado no backend: .not(coluna, 'is', null)
+      not: (c, op, v) => (filtros.push((r) => (op === 'is' && v === null ? r[c] !== null && r[c] !== undefined : r[c] !== v)), api),
       range: (de, ate) => ((faixa = [de, ate]), api),
       maybeSingle: () => ((unico = 'maybe'), api),
       single: () => ((unico = 'single'), api),

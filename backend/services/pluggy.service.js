@@ -2,6 +2,7 @@ import { PluggyClient } from 'pluggy-sdk';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 import { normalizarCategoria, tipoGastoPadrao, categoriaInfo } from '../utils/categorias.js';
 import { dataCaixaDaParcela } from '../utils/fatura.js';
+import { aplicarRegras } from './regras.service.js';
 import { httpError } from '../utils/http.js';
 
 // Criado sob demanda: sem as chaves da Pluggy o servidor continua de pé
@@ -274,6 +275,9 @@ export async function sincronizarTransacoesDoItem(itemId, userId) {
   }
 
   if (linhas.length === 0) return { count: 0, novas: 0, atualizadas: 0 };
+  // Regras do cliente: novas entram classificadas; nas existentes só o
+  // nome amigável é mantido (categoria/tipo não são sobrescritos abaixo).
+  await aplicarRegras(userId, linhas);
 
   const existentes = new Set();
   for (const lote of dividirEmLotes(linhas.map((l) => l.open_finance_id))) {
