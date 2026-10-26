@@ -20,7 +20,12 @@ export const extratoTransacaoSchema = z.object({
     .optional()
     .transform((v) => v || 'Outros')
     .default('Outros'),
-}).transform((t) => ({ ...t, categoriaOriginal: t.categoria, categoria: normalizarCategoria(t.categoria, t.descricao, t.valor) }));
+}).transform((t) => {
+  // A IA às vezes devolve todos os valores positivos e só acerta o "tipo".
+  // O tipo manda no sinal: senão um gasto vira entrada (ou o contrário).
+  const valor = t.tipo === 'saida' ? -Math.abs(t.valor) : t.tipo === 'entrada' ? Math.abs(t.valor) : t.valor;
+  return { ...t, valor, categoriaOriginal: t.categoria, categoria: normalizarCategoria(t.categoria, t.descricao, valor) };
+});
 
 export const extratoRespostaSchema = z.object({
   transacoes: z.array(extratoTransacaoSchema).max(600),

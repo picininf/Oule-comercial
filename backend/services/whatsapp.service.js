@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 import { analisarComprovante } from './gemini.service.js';
-import { categoriaInfo, tipoGastoPadrao, normalizarCategoria } from '../utils/categorias.js';
+import { categoriaInfo, tipoGastoPadrao, categoriaDaEntrada, revisarTransferencia } from '../utils/categorias.js';
 import { formatarMoeda, hojeBrasil, mesDe, somarMeses, getValorAjustado, ehTransferencia } from '../utils/financeUtils.js';
 import { aplicarRegras } from './regras.service.js';
 import { proximosVencimentos } from './pagamentos.service.js';
@@ -360,15 +360,19 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
     const filename = `${crypto.randomUUID()}.jpg`;
     fs.writeFileSync(path.join(uploadsFolder, filename), buffer);
 
-    const dados = await analisarComprovante(buffer, 'image/jpeg');
-    // Comprovante enviado pelo cliente é pagamento a alguém. "Transferências"
-    // é só para dinheiro entre contas da própria pessoa — se a IA marcar
-    // assim um Pix para terceiros, o gasto sumiria dos totais e do !resumo.
-    const categoria = dados.categoria === 'Transferências'
-      ? normalizarCategoria(null, dados.estabelecimento, -Math.abs(dados.valor))
-      : dados.categoria;
-    const ehReceita = categoriaInfo(categoria).grupo === 'receita';
+    const { data: perfil } = await supabaseAdmin.from('profiles').select('nome').eq('id', targetUserId).maybeSingle();
+    const dados = await analisarComprovante(buffer, 'image/jpeg', { nomeCliente: perfil?.nome });
+    // A direção vem da IA (Pix recebido = entrada). Antes todo comprovante
+    // virava gasto, e dinheiro recebido não aparecia em lugar nenhum.
+    const ehReceita = dados.direcao === 'entrada' || categoriaInfo(dados.categoria).grupo === 'receita';
     const valorFinal = ehReceita ? Math.abs(dados.valor) : -Math.abs(dados.valor);
+    // "Transferências" é só para dinheiro entre contas da própria pessoa —
+    // um Pix de/para terceiros marcado assim sumiria dos totais e do !resumo.
+    const categoria = revisarTransferencia(categoriaDaEntrada(dados.categoria, dados.estabelecimento, valorFinal), {
+      descricao: dados.estabelecimento,
+      valor: valorFinal,
+      nomeCliente: perfil?.nome,
+    });
 
     const [linha] = await aplicarRegras(targetUserId, [
       {
@@ -395,7 +399,7 @@ async function tratarComprovante(sock, msg, from, cleanId, altCleanId, altJid) {
     }
 
     await sock.sendMessage(from, {
-      text: `✅ *Comprovante processado!*\n\n🏢 *Local:* ${linha.descricao}\n💰 *Valor:* ${formatarMoeda(Math.abs(valorFinal))}\n📂 *Categoria:* ${linha.categoria}` +
+      text: `✅ *Comprovante processado!*\n\n🏢 *Local:* ${linha.descricao}\n💰 *Valor:* ${ehReceita ? '📥 entrada de' : '📤 gasto de'} ${formatarMoeda(Math.abs(valorFinal))}\n📂 *Categoria:* ${linha.categoria}` +
         (linha.regra_id ? '\n📌 _Classificado pela sua regra._' : '') +
         '\n\n_Lançamento gravado no painel._',
     });
@@ -430,7 +434,7 @@ async function tratarConsulta(sock, comando, from, ids, argumento = '') {
     await sock.sendMessage(from, {
       text:
         '🤖 *Comandos do assistente Oule*\n\n' +
-        '📷 *!imagem* — envie a foto do comprovante com esta legenda\n' +
+        '📷 *!imagem* — envie a foto do comprovante com esta legenda (vale para gasto e para Pix/dinheiro recebido)\n' +
         '🧾 *!contas* — contas a vencer nos próximos dias\n' +
         '📊 *!resumo* — entradas e saídas do mês (*!resumo anterior* ou *!resumo 09/2026* para outro mês)\n' +
         '🔗 *!vincular CODIGO* — vincula este número à sua conta',

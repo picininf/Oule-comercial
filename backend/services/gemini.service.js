@@ -63,9 +63,14 @@ const PROMPT_COMPROVANTE = `Analise este comprovante de pagamento ou nota fiscal
   "valor": 0.00,
   "data": "AAAA-MM-DD",
   "categoria": "${LISTA_CATEGORIAS}",
-  "metodo_pagamento": "Pix | Cartão | Boleto | Dinheiro"
+  "metodo_pagamento": "Pix | Cartão | Boleto | Dinheiro",
+  "direcao": "saida | entrada"
 }
+Regras de direção:
+- "entrada" quando o comprovante mostra dinheiro RECEBIDO pelo cliente (Pix/TED recebido, depósito, salário, venda, reembolso). Se o nome do cliente aparecer como recebedor/favorecido/destinatário, é "entrada".
+- "saida" quando o cliente PAGOU alguém (compra, nota fiscal, Pix/TED enviado, boleto pago). Na dúvida, "saida".
 Regras de categoria:
+- Em "entrada", use uma categoria de receita (Salário, Renda Extra, Rendimentos ou Reembolsos).
 - Pix, TED ou transferência para OUTRA pessoa ou empresa é um pagamento: escolha a categoria pelo que provavelmente foi pago (ou "Outros"), NUNCA "Transferências".
 - Use "Transferências" somente quando pagador e recebedor forem a MESMA pessoa (mesmo nome/CPF) ou for pagamento da fatura do próprio cartão.
 Responda APENAS o JSON bruto sem formatação Markdown extra. Não inclua nenhum texto fora do JSON.`;
@@ -156,9 +161,13 @@ function lerJsonDaResposta(response, mensagemErro) {
  * de devolver. Uma alucinação da IA (categoria fora da lista, valor
  * absurdo, string maliciosa) nunca chega "crua" ao banco de dados.
  */
-export async function analisarComprovante(buffer, mimeType = 'image/jpeg') {
+export async function analisarComprovante(buffer, mimeType = 'image/jpeg', { nomeCliente = '' } = {}) {
   const imagePart = { inlineData: { data: buffer.toString('base64'), mimeType } };
-  const result = await gerarComFallback(primaryModel, fallbackModel, [PROMPT_COMPROVANTE, imagePart], 'comprovante');
+  // Sem saber quem é o cliente, a IA não distingue "Pix que ele mandou" de
+  // "Pix que ele recebeu" — e todo Pix recebido virava gasto.
+  const nome = String(nomeCliente || '').replace(/[^\p{L}\s'.-]/gu, '').trim().slice(0, 80);
+  const prompt = nome ? `${PROMPT_COMPROVANTE}\nO cliente que enviou este comprovante se chama: ${nome}.` : PROMPT_COMPROVANTE;
+  const result = await gerarComFallback(primaryModel, fallbackModel, [prompt, imagePart], 'comprovante');
   const bruto = lerJsonDaResposta(await result.response, 'A IA não conseguiu ler este comprovante.');
 
   const validado = comprovanteSchema.safeParse(bruto);

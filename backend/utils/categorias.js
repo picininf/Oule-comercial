@@ -150,7 +150,7 @@ export function normalizarCategoria(categoriaBruta, descricao = '', valor = null
 
   if (bruto) {
     const exata = POR_NOME_NORMALIZADO.get(bruto) || ALIASES[bruto];
-    if (exata && exata !== 'Outros') return exata;
+    if (exata && exata !== 'Outros') return categoriaDaEntrada(exata, descricao, valor);
     resultado = porRegras(bruto);
   }
 
@@ -163,7 +163,48 @@ export function normalizarCategoria(categoriaBruta, descricao = '', valor = null
   if (resultado === TRANSFERENCIA_GENERICA) {
     return Number(valor) > 0 ? 'Renda Extra' : 'Outros';
   }
-  return resultado || 'Outros';
+  return categoriaDaEntrada(resultado || 'Outros', descricao, valor);
+}
+
+/**
+ * Dinheiro que ENTRA não pode cair numa categoria de despesa: no Plano a
+ * categoria soma o valor como se fosse gasto, e o lançamento some das
+ * receitas. Ex.: "Pix recebido - Escola ABC" (a pessoa dá aula) casava
+ * com Educação. Resgate de investimento continua em Investimentos.
+ */
+export function categoriaDaEntrada(categoria, descricao = '', valor = null) {
+  if (!(Number(valor) > 0)) return categoria;
+  const grupo = categoriaInfo(categoria).grupo;
+  if (grupo !== 'despesa' || categoria === 'Investimentos') return categoria;
+  return /estorn|reembols|refund|chargeback|devoluc|cancelament/.test(semAcento(descricao)) ? 'Reembolsos' : 'Renda Extra';
+}
+
+// Únicos casos em que "Transferências" (nem gasto nem renda) é certo:
+// dinheiro entre contas da própria pessoa e pagamento da fatura do cartão.
+const TRANSFERENCIA_PROPRIA = /mesma titularidade|same person|entre contas|contas proprias|conta propria|pagamento da fatura|pagamento de fatura|pgto fatura|pag fatura|pagto cartao|credit card payment|resgate automatico|aplicacao automatica|pagamento efetuado/;
+
+/**
+ * Revisa um "Transferências" vindo da IA, de planilha ou de regra
+ * genérica. A IA marca quase todo "Transferência recebida pelo Pix" como
+ * Transferências — e transferência não conta como renda, então o salário
+ * ou o Pix de um cliente sumia de todos os totais. Só fica em
+ * Transferências o que é claramente movimento da própria pessoa:
+ *   - texto de conta própria / pagamento de fatura;
+ *   - nome do próprio cliente na descrição (Pix de mim para mim);
+ *   - lançamento de cartão (pagamento da fatura / crédito na fatura).
+ * O resto vira Renda Extra (entrada) ou é reclassificado pela descrição.
+ */
+export function revisarTransferencia(categoria, { descricao = '', valor = null, categoriaOriginal = '', nomeCliente = '', ehCartao = false } = {}) {
+  if (categoria !== 'Transferências') return categoria;
+  if (ehCartao) return categoria;
+  const texto = semAcento(`${categoriaOriginal || ''} ${descricao || ''}`);
+  if (TRANSFERENCIA_PROPRIA.test(texto)) return categoria;
+  const nome = semAcento(nomeCliente).replace(/\s+/g, ' ');
+  if (nome.split(' ').length >= 2 && semAcento(descricao).replace(/\s+/g, ' ').includes(nome)) return categoria;
+
+  const pelaDescricao = porRegras(descricao, { ignorarGenerica: true });
+  if (pelaDescricao && pelaDescricao !== 'Transferências') return categoriaDaEntrada(pelaDescricao, descricao, valor);
+  return Number(valor) > 0 ? 'Renda Extra' : 'Outros';
 }
 
 export function categoriaInfo(id) {

@@ -285,7 +285,7 @@ function DetalheMes({ mes, regime, onEditar, onCopiar }) {
   );
 }
 
-function EditorOrcamento({ mes, userId, onFechar, onSalvo }) {
+export function EditorOrcamento({ mes, userId, onFechar, onSalvo }) {
   const toast = useToast();
   const { fmt } = useValores();
   const [valores, setValores] = useState({});

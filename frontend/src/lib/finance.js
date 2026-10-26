@@ -29,6 +29,12 @@ export function ehTransferencia(t) {
   return t.categoria === 'Transferências';
 }
 
+/** Entrada / saída / transferência, para filtros. */
+export function movimentoDe(t) {
+  if (ehTransferencia(t)) return 'transferencia';
+  return getValorAjustado(t) > 0 ? 'entrada' : 'saida';
+}
+
 export function dataNoRegime(t, regime = 'competencia') {
   return regime === 'caixa' ? t.data_caixa || t.data_transacao : t.data_competencia || t.data_transacao;
 }
@@ -52,10 +58,16 @@ export function origemDe(t) {
 export function resumir(transacoes) {
   let entradas = 0;
   let saidas = 0;
+  // Dinheiro recebido marcado como Transferências não entra nos totais.
+  // Fica separado para a tela avisar (senão parece que a entrada sumiu).
+  let transferenciasRecebidas = 0;
   const porCategoria = {};
   const porTipoGasto = {};
   for (const t of transacoes) {
-    if (ehTransferencia(t)) continue;
+    if (ehTransferencia(t)) {
+      if (Number(t.valor) > 0) transferenciasRecebidas += Number(t.valor);
+      continue;
+    }
     const v = getValorAjustado(t);
     if (v > 0) entradas += v;
     else if (v < 0) {
@@ -71,6 +83,7 @@ export function resumir(transacoes) {
     saidas,
     saldo: entradas - saidas,
     taxaPoupanca: entradas > 0 ? ((entradas - saidas) / entradas) * 100 : 0,
+    transferenciasRecebidas,
     porCategoria,
     porTipoGasto,
   };

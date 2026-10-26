@@ -21,7 +21,12 @@ export const comprovanteSchema = z.object({
   // Qualquer texto que a IA devolver é convertido para uma Categoria Oule.
   categoria: z.string().trim().max(60).optional().default('Outros'),
   metodo_pagamento: z.enum(['Pix', 'Cartão', 'Boleto', 'Dinheiro']).catch('Pix').default('Pix'),
-}).transform((c) => ({ ...c, categoria: normalizarCategoria(c.categoria, c.estabelecimento) }));
+  // Comprovante de dinheiro recebido (Pix recebido, depósito) é entrada.
+  direcao: z.enum(['saida', 'entrada']).catch('saida').default('saida'),
+}).transform((c) => ({
+  ...c,
+  categoria: normalizarCategoria(c.categoria, c.estabelecimento, c.direcao === 'entrada' ? Math.abs(c.valor) : -Math.abs(c.valor)),
+}));
 
 // Params de rota com itemId da Pluggy (uuid)
 export const itemIdParamSchema = z.object({

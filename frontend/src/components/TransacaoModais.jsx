@@ -189,12 +189,22 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
     categoria: transacao.categoria || 'Outros',
     tipoGasto: transacao.tipo_gasto || '',
     observacao: transacao.observacao || '',
+    sentido: Number(transacao.valor) > 0 ? 'entrada' : 'saida',
     aplicarSemelhantes: false,
   });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const set = (campo) => (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
-  const ehDespesa = Number(transacao.valor) < 0 && categoriaInfo(form.categoria).grupo === 'despesa';
+  const sentidoOriginal = Number(transacao.valor) > 0 ? 'entrada' : 'saida';
+  const ehDespesa = form.sentido === 'saida' && categoriaInfo(form.categoria).grupo === 'despesa';
+  const trocarSentido = (sentido) => setForm((f) => ({
+    ...f,
+    sentido,
+    // Ao virar entrada, sugere uma categoria de receita (e vice-versa).
+    categoria: sentido === 'entrada' && categoriaInfo(f.categoria).grupo === 'despesa' ? 'Renda Extra'
+      : sentido === 'saida' && categoriaInfo(f.categoria).grupo === 'receita' ? 'Outros' : f.categoria,
+    tipoGasto: '',
+  }));
 
   const salvar = async (e) => {
     e.preventDefault();
@@ -207,6 +217,7 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
         tipoGasto: ehDespesa ? form.tipoGasto || null : null,
         observacao: form.observacao || null,
         aplicarSemelhantes: form.aplicarSemelhantes,
+        ...(form.sentido !== sentidoOriginal ? { sentido: form.sentido } : {}),
       });
       toast(r.atualizadas > 1 ? `${r.atualizadas} lançamentos atualizados.` : 'Lançamento atualizado.');
       onSalvo?.();
@@ -232,6 +243,12 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
     >
       <form id="form-editar-transacao" onSubmit={salvar} className="pilha" style={{ gap: 16 }}>
         <Alerta>{erro}</Alerta>
+        {!transacao.open_finance_id && (
+          <div className="segmentado" role="group" aria-label="Entrada ou gasto">
+            <button type="button" className={form.sentido === 'saida' ? 'ativo' : ''} onClick={() => trocarSentido('saida')}>📤 Gasto</button>
+            <button type="button" className={form.sentido === 'entrada' ? 'ativo' : ''} onClick={() => trocarSentido('entrada')}>📥 Entrada</button>
+          </div>
+        )}
         <Campo rotulo="Descrição">
           <input required maxLength={200} value={form.descricao} onChange={set('descricao')} disabled={Boolean(transacao.open_finance_id)} />
         </Campo>

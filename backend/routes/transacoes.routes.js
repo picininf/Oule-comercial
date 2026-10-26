@@ -100,10 +100,13 @@ const edicaoSchema = z.object({
   tipoGasto: z.enum(TIPOS_GASTO_IDS).nullable().optional(),
   descricao: z.string().trim().min(1).max(200).optional(),
   observacao: z.string().trim().max(500).nullable().optional(),
+  // Corrige o sentido de um lançamento gravado errado (ex.: Pix recebido
+  // que o comprovante do WhatsApp registrou como gasto).
+  sentido: z.enum(['entrada', 'saida']).optional(),
   // Recategorizar todos os lançamentos com a mesma descrição (ex.: todo
   // "PADARIA DO ZE" vira Alimentação de uma vez).
   aplicarSemelhantes: z.boolean().default(false),
-}).refine((b) => b.categoria || b.tipoGasto !== undefined || b.descricao || b.observacao !== undefined, {
+}).refine((b) => b.categoria || b.tipoGasto !== undefined || b.descricao || b.observacao !== undefined || b.sentido, {
   message: 'Nada para atualizar.',
 });
 
@@ -123,9 +126,20 @@ router.patch('/:id', validar(edicaoSchema), async (req, res, next) => {
     const b = req.body;
     const payload = { updated_at: new Date().toISOString() };
 
+    let valor = Number(atual.valor);
+    if (b.sentido) {
+      if (atual.open_finance_id) throw httpError(409, 'O sentido de um lançamento do banco vem do próprio banco e não pode ser trocado.');
+      valor = b.sentido === 'entrada' ? Math.abs(valor) : -Math.abs(valor);
+      payload.valor = valor;
+      payload.tipo = valor < 0 ? 'despesa' : 'receita';
+      // Entrada não tem tipo de gasto; saída volta para o padrão da categoria.
+      const categoria = b.categoria || atual.categoria;
+      payload.tipo_gasto = valor < 0 && categoriaInfo(categoria).grupo === 'despesa' ? categoriaInfo(categoria).tipoGasto : null;
+    }
+
     if (b.categoria) {
       payload.categoria = b.categoria;
-      const despesa = Number(atual.valor) < 0 && categoriaInfo(b.categoria).grupo === 'despesa';
+      const despesa = valor < 0 && categoriaInfo(b.categoria).grupo === 'despesa';
       // Ao trocar a categoria sem informar o tipo de gasto, sugere o
       // padrão da nova categoria.
       payload.tipo_gasto = despesa ? (b.tipoGasto !== undefined ? b.tipoGasto : categoriaInfo(b.categoria).tipoGasto) : null;
@@ -137,7 +151,7 @@ router.patch('/:id', validar(edicaoSchema), async (req, res, next) => {
 
     let query = supabaseAdmin.from('transacoes').update(payload).eq('user_id', atual.user_id);
     if (b.aplicarSemelhantes && (b.categoria || b.tipoGasto !== undefined)) {
-      const { descricao, observacao, ...somenteClassificacao } = payload;
+      const { descricao, observacao, valor: _v, tipo: _t, ...somenteClassificacao } = payload;
       query = supabaseAdmin
         .from('transacoes')
         .update(somenteClassificacao)
@@ -145,8 +159,8 @@ router.patch('/:id', validar(edicaoSchema), async (req, res, next) => {
         .eq('descricao', atual.descricao);
       if (Number(atual.valor) < 0) query = query.lt('valor', 0);
       else query = query.gt('valor', 0);
-      // a própria linha também pode ter descrição/observação editadas
-      if (b.descricao || b.observacao !== undefined) {
+      // a própria linha também pode ter descrição/observação/sentido editados
+      if (b.descricao || b.observacao !== undefined || b.sentido) {
         const { error } = await supabaseAdmin.from('transacoes').update(payload).eq('id', atual.id);
         if (error) throw error;
       }

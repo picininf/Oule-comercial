@@ -137,3 +137,38 @@ O menu do cliente caiu de **15 para 7 entradas**. Telas parecidas viraram sub-ab
 **Problema:** aluguel, luz e água cadastrados em *Contas do mês* não mudavam a previsão. O Planejamento usava o **maior** entre a média de gastos recente e o total de contas fixas — como a média (R$ 625) era maior que as contas (R$ 600), elas "sumiam".
 
 **Agora:** a previsão é feita categoria a categoria: para cada uma vale o maior entre a média (ou o plano) e as contas fixas. Conta nova (que não estava no histórico nem no plano) **soma**; conta que já aparecia no histórico (ex.: aluguel pago todo mês) **não conta duas vezes**. O detalhe do mês mostra "Saídas previstas", a origem ("pela média recente + contas fixas") e uma coluna **Conta fixa** por categoria.
+
+---
+
+## Atualização de 26/10/2026 — entradas que não apareciam + Meta do mês
+
+### ⚠️ Antes de rodar
+
+1. **Nada de SQL novo.** Só reinicie o backend (Render) e publique o frontend (Vercel).
+2. **Conserte o que já está gravado** (no computador, dentro de `backend/`, com o `.env` de produção):
+   `npm run corrigir:entradas -- --teste` mostra o que vai mudar; depois `npm run corrigir:entradas` aplica.
+
+### Card "Receita | Porque não apareceu"
+
+| Problema | Causa | Correção |
+|---|---|---|
+| Pix/TED **recebido** de outra pessoa sumia de todos os totais (Início, Transações, Plano, `!resumo`) | A IA do extrato (PDF/foto) marcava "Transferência recebida pelo Pix" como **Transferências**, que por regra não conta nem como gasto nem como renda. "Pagamento recebido" (Mercado Pago, PicPay) também caía lá. | Transferências agora só vale para dinheiro **da própria pessoa** (mesma titularidade, entre contas, nome do próprio cliente na descrição) ou **pagamento de fatura**. O resto que entra vira **Renda Extra**. Vale para extrato, planilha, Open Finance e WhatsApp. |
+| Comprovante de **Pix recebido** enviado no WhatsApp virava **gasto** | O bot tratava todo comprovante como pagamento. | A IA agora informa a direção (recebido/enviado) e recebe o nome do cliente para saber quem é o recebedor. A resposta do bot diz "📥 entrada" ou "📤 gasto". |
+| Entrada caía em categoria de despesa (ex.: "Pix recebido - Escola ABC" em Educação) e no Plano somava como **gasto** | A categoria era escolhida só pela descrição. | Dinheiro que entra nunca fica em categoria de despesa: vira Renda Extra (ou Reembolsos, se for estorno). Resgate de investimento continua em Investimentos. |
+| Planilhas da Caixa ("Deb/Cred"), BB ("Tipo Lançamento") e com colunas "Valor Débito"/"Valor Crédito" com sinal errado | O valor vinha sem sinal e a coluna que dizia D/C era ignorada. | Coluna de natureza reconhecida (D/C, Deb/Cred, Tipo Lançamento, Entrada/Saída). |
+| Extrato lido pela IA com valores todos positivos | O campo "tipo" (entrada/saída) era ignorado. | O tipo manda no sinal. |
+| Não dava para corrigir um lançamento gravado no sentido errado | — | Em **Editar lançamento** há a chave **📤 Gasto / 📥 Entrada** (menos para Open Finance, onde o banco manda). |
+
+Também: filtro **Só entradas / Só saídas / Só transferências** em Transações, e o card "Entrou" avisa quando há dinheiro recebido parado em Transferências.
+
+### Card "Meta dentro do mês e atualização"
+
+Novo bloco **🎯 Meta do mês** no Início, recalculado a cada lançamento:
+
+- **Gastos x meta** (o plano do mês; sem plano, a média dos últimos 3 meses), com a marca do **ritmo esperado até hoje**.
+- **Quanto ainda dá para gastar** (já descontando as contas fixas não pagas) e quanto por dia.
+- **Meta de guardar** (% das premissas do ano) e a sobra prevista para o fim do mês.
+- Categorias do plano com status (ok / atenção / estourou) e o que ficou fora do plano.
+- **✏️ Atualizar meta**: muda o % de poupança e abre o plano de gastos por categoria do mês.
+
+Endpoint: `GET /api/plano/meta-mes?mes=AAAA-MM`. Testes: `npm test` (29, incluindo `tests/entradas.test.js`).

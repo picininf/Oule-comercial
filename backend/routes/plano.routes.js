@@ -7,7 +7,7 @@ import { httpError } from '../utils/http.js';
 import { hojeBrasil, idadeEmAnos } from '../utils/financeUtils.js';
 import { validar } from '../validators/validate.js';
 import { CATEGORIA_IDS } from '../utils/categorias.js';
-import { montarPainel, sugerirOrcamento, premissasParaApi } from '../services/plano.service.js';
+import { montarPainel, sugerirOrcamento, premissasParaApi, metaDoMes } from '../services/plano.service.js';
 import { projetarFuturo, aposentadoriaParaApi, calcularAposentadoria } from '../services/projecao.service.js';
 
 const router = Router();
@@ -31,6 +31,22 @@ router.get('/painel', async (req, res, next) => {
     const alvo = await resolverUsuarioAlvo(req, req.query.userId);
     const regime = req.query.regime === 'caixa' ? 'caixa' : 'competencia';
     res.json(await montarPainel(alvo, { ano: anoValido(req.query.ano), regime }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/plano/meta-mes?mes=AAAA-MM&userId=
+ * Meta do mês recalculada na hora: gastos x plano, ritmo, quanto ainda
+ * dá para gastar e se a meta de guardar será batida.
+ */
+router.get('/meta-mes', async (req, res, next) => {
+  try {
+    const alvo = await resolverUsuarioAlvo(req, req.query.userId);
+    const mes = mesSchema.safeParse(String(req.query.mes || hojeBrasil().slice(0, 7)));
+    if (!mes.success) throw httpError(400, 'Informe o mês no formato AAAA-MM.');
+    res.json(await metaDoMes(alvo, mes.data));
   } catch (err) {
     next(err);
   }

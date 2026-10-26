@@ -160,14 +160,29 @@ function parseOfx(texto) {
 // Detecção de colunas
 // ---------------------------------------------------------------------
 
+// A ordem importa: a primeira chave que casar fica com a coluna. Débito e
+// crédito vêm antes de "valor" para que "Valor Débito"/"Valor Crédito" não
+// virem uma coluna única de valor sem sinal (todo débito virava entrada).
 const PADROES_COLUNA = {
   data: /^(data|date|dt)\b|data (do )?lanc|data mov|data da compra|^dia$/,
+  // Coluna que diz se o valor (sem sinal) é débito ou crédito: Caixa
+  // ("Deb/Cred"), BB ("Tipo Lançamento"), "D/C", "Natureza"...
+  natureza: /^(d\/c|c\/d|deb\/cred|cred\/deb|debito\/credito|credito\/debito|tipo|natureza|tipo (de )?lancamento|tipo (de )?transacao|tipo (de )?operacao|entrada\/saida|e\/s)$/,
   descricao: /descri|historico|lancamento|estabelecimento|memo|detalhe|titulo|title|description|nome|favorecido|^item$/,
-  valor: /^valor|amount|quantia|^montante|valor \(r\$\)|valor em r\$|^r\$$/,
   debito: /debito|saida|^saidas?$|valor debito/,
   credito: /credito|entrada|^entradas?$|valor credito/,
+  valor: /^valor|amount|quantia|^montante|valor \(r\$\)|valor em r\$|^r\$$/,
   categoria: /categoria|category/,
 };
+
+/** Sinal indicado pela coluna de natureza: -1 débito, 1 crédito, 0 desconhecido. */
+function sinalDaNatureza(celula) {
+  const n = semAcento(celula);
+  if (!n) return 0;
+  if (/^(d|deb|debito|saida|s|-|out|debit)\b/.test(n)) return -1;
+  if (/^(c|cred|credito|entrada|e|\+|in|credit)\b/.test(n)) return 1;
+  return 0;
+}
 
 function acharCabecalho(linhas) {
   for (let i = 0; i < Math.min(linhas.length, 40); i++) {
@@ -226,6 +241,10 @@ function linhasParaTransacoes(linhas) {
 
     let valor = null;
     if (idx.valor !== undefined) valor = parseValor(l[idx.valor]);
+    if (valor !== null && idx.natureza !== undefined) {
+      const sinal = sinalDaNatureza(l[idx.natureza]);
+      if (sinal) valor = sinal * Math.abs(valor);
+    }
     if (valor === null && (idx.debito !== undefined || idx.credito !== undefined)) {
       const deb = idx.debito !== undefined ? parseValor(l[idx.debito]) : null;
       const cred = idx.credito !== undefined ? parseValor(l[idx.credito]) : null;

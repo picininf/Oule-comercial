@@ -4,6 +4,7 @@ import MenuExportar from '../components/MenuExportar';
 import AvisoVencimentos from '../components/AvisoVencimentos';
 import ResumoSonhos from '../components/ResumoSonhos';
 import ComparativoPerfil from '../components/ComparativoPerfil';
+import MetaDoMes from '../components/MetaDoMes';
 import { useApi } from '../hooks/useApi';
 import { resumir, getValorAjustado, ehTransferencia } from '../lib/finance';
 import { categoriaInfo, TIPOS_GASTO } from '../lib/categorias';
@@ -87,7 +88,17 @@ export default function DashboardPage({ userId = null, onNavegar }) {
       </div>
 
       <div className="metricas">
-        <Metrica rotulo="Entrou" icone="📥" valor={fmt(doMes.entradas)} tom="positivo" detalhe={`Mês anterior: ${fmt(doAnterior.entradas)}`} />
+        <Metrica
+          rotulo="Entrou"
+          icone="📥"
+          valor={fmt(doMes.entradas)}
+          tom="positivo"
+          detalhe={
+            doMes.transferenciasRecebidas > 0
+              ? `+ ${fmt(doMes.transferenciasRecebidas)} em Transferências (não conta como renda)`
+              : `Mês anterior: ${fmt(doAnterior.entradas)}`
+          }
+        />
         <Metrica
           rotulo="Saiu"
           icone="📤"
@@ -104,6 +115,8 @@ export default function DashboardPage({ userId = null, onNavegar }) {
           detalhe="do que entrou · meta: 20% ou mais"
         />
       </div>
+
+      <MetaDoMes userId={userId} mes={mes} onNavegar={onNavegar} />
 
       <div className="grade-lateral">
         <Card

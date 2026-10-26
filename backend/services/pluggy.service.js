@@ -1,6 +1,6 @@
 import { PluggyClient } from 'pluggy-sdk';
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
-import { normalizarCategoria, tipoGastoPadrao, categoriaInfo } from '../utils/categorias.js';
+import { normalizarCategoria, revisarTransferencia, tipoGastoPadrao, categoriaInfo } from '../utils/categorias.js';
 import { dataCaixaDaParcela } from '../utils/fatura.js';
 import { aplicarRegras } from './regras.service.js';
 import { httpError } from '../utils/http.js';
@@ -208,7 +208,7 @@ async function garantirCartaoDaConta(userId, account) {
   return criado;
 }
 
-function montarLinha({ t, userId, account, cartao }) {
+function montarLinha({ t, userId, account, cartao, nomeCliente = '' }) {
   // O sinal pela coluna `type` é confiável para conta e cartão: na
   // Pluggy, compras no cartão chegam com amount POSITIVO, o que antes
   // fazia toda compra de cartão virar "entrada".
@@ -220,7 +220,13 @@ function montarLinha({ t, userId, account, cartao }) {
   const dataCompra = paraDataIso(meta.purchaseDate) || dataLancamento;
   const ehCartao = account.type === 'CREDIT';
 
-  const categoria = normalizarCategoria(t.category, t.description, valor);
+  const categoria = revisarTransferencia(normalizarCategoria(t.category, t.description, valor), {
+    descricao: t.description || t.descriptionRaw,
+    valor,
+    categoriaOriginal: t.category,
+    nomeCliente,
+    ehCartao,
+  });
   const despesa = valor < 0 && categoriaInfo(categoria).grupo === 'despesa';
 
   return {
@@ -264,13 +270,16 @@ export async function sincronizarTransacoesDoItem(itemId, userId) {
   const accounts = accountsResponse.results || [];
   if (accounts.length === 0) return { count: 0, novas: 0, atualizadas: 0 };
 
+  const { data: perfil } = await supabaseAdmin.from('profiles').select('nome').eq('id', userId).maybeSingle();
+  const nomeCliente = perfil?.nome || '';
+
   const linhas = [];
   for (const account of accounts) {
     const cartao = account.type === 'CREDIT' ? await garantirCartaoDaConta(userId, account) : null;
     const transacoes = await pluggy().fetchAllTransactions(account.id);
     for (const t of transacoes) {
       if (t.status === 'PENDING') continue; // ainda não lançada pelo banco
-      linhas.push(montarLinha({ t, userId, account, cartao }));
+      linhas.push(montarLinha({ t, userId, account, cartao, nomeCliente }));
     }
   }
 

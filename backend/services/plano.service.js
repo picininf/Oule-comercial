@@ -1,8 +1,8 @@
 import { supabaseAdmin } from '../config/supabaseAdmin.js';
 import { categoriaInfo } from '../utils/categorias.js';
 import {
-  getValorAjustado, ehTransferencia, dataNoRegime, hojeBrasil, mesDe, somarMeses, formatarMoeda, formatarPct } from '../utils/financeUtils.js';
-import { vigenteNoMes } from './pagamentos.service.js';
+  getValorAjustado, ehTransferencia, dataNoRegime, hojeBrasil, mesDe, somarMeses, diasNoMes, formatarMoeda, formatarPct } from '../utils/financeUtils.js';
+import { vigenteNoMes, contasDoMes } from './pagamentos.service.js';
 
 /**
  * Plano x Vida Real.
@@ -546,4 +546,139 @@ function avaliarSonhos({ objetivos, meses }) {
       if (cabe) sobraDisponivel -= necessario;
       return { id: o.id, titulo: o.titulo, prazo: o.prazo, falta, aporteMensalNecessario: arred(necessario), cabeNoPrazo: cabe, motivo };
     });
+}
+
+/**
+ * Meta do mês, atualizada a cada lançamento: quanto ainda dá para gastar,
+ * se o ritmo está dentro do plano e se a meta de guardar vai ser batida.
+ *
+ * - Meta de gastos: o plano do mês (despesas); sem plano, a média real
+ *   dos últimos 3 meses serve de referência.
+ * - Meta de guardar: % de poupança das premissas do ano sobre a renda do
+ *   mês (o que já entrou, ou o planejado/média se ainda não entrou).
+ * - Contas fixas ainda não pagas entram como "já comprometido".
+ */
+export async function metaDoMes(userId, mes) {
+  const hoje = hojeBrasil();
+  const mesAtual = mesDe(hoje);
+  const ano = Number(mes.slice(0, 4));
+
+  const [transacoes, { data: plano, error: e1 }, { data: premissasLinha }, historico, contas] = await Promise.all([
+    buscarTransacoes(userId, 'data_competencia', `${mes}-01`, `${somarMeses(mes, 1)}-01`),
+    supabaseAdmin.from('plano_mensal').select('categoria, valor_planejado').eq('user_id', userId).eq('mes', mes),
+    supabaseAdmin.from('plano_premissas').select('*').eq('user_id', userId).eq('ano', ano).maybeSingle(),
+    mediaHistorica(userId, { meses: 3 }),
+    mes >= mesAtual ? contasDoMes(userId, mes).catch(() => []) : Promise.resolve([]),
+  ]);
+  if (e1) throw e1;
+  const premissas = premissasParaApi(premissasLinha);
+
+  let entradas = 0;
+  let saidas = 0;
+  const realPorCategoria = {};
+  for (const t of transacoes) {
+    const c = classificar(t);
+    if (!c) continue;
+    if (c.entrada) entradas += c.valor;
+    else {
+      saidas += -c.valor;
+      realPorCategoria[c.categoria] = (realPorCategoria[c.categoria] || 0) + -c.valor;
+    }
+  }
+
+  let planoReceitas = 0;
+  const planoDespesas = {};
+  for (const p of plano || []) {
+    const valor = Number(p.valor_planejado) || 0;
+    if (categoriaInfo(p.categoria).grupo === 'receita') planoReceitas += valor;
+    else planoDespesas[p.categoria] = (planoDespesas[p.categoria] || 0) + valor;
+  }
+  const totalPlanoDespesas = Object.values(planoDespesas).reduce((a, b) => a + b, 0);
+  const temPlano = totalPlanoDespesas > 0;
+
+  const estado = mes < mesAtual ? 'encerrado' : mes === mesAtual ? 'em_andamento' : 'futuro';
+  const totalDias = diasNoMes(mes);
+  const diaHoje = estado === 'em_andamento' ? Number(hoje.slice(8, 10)) : estado === 'encerrado' ? totalDias : 0;
+  const fracaoDoMes = diaHoje / totalDias;
+  const diasRestantes = totalDias - diaHoje;
+
+  const metaGastos = temPlano ? totalPlanoDespesas : historico.saidas || null;
+  const fonteMetaGastos = temPlano ? 'plano' : historico.saidas ? 'media' : 'sem_dados';
+  const contasPendentes = (contas || []).filter((c) => c.status !== 'pago');
+  const aindaVaiSair = contasPendentes.reduce((s, c) => s + (Number(c.valor) || 0), 0);
+
+  const rendaReferencia = Math.max(entradas, planoReceitas || historico.entradas || 0);
+  const metaGuardar = rendaReferencia * (premissas.metaPoupancaPct / 100);
+  const guardado = entradas - saidas;
+  // Gasto esperado até o fim do mês: o maior entre a meta de gastos e o
+  // que já saiu + contas fixas ainda por pagar. Mês encerrado: o real.
+  const gastoPrevisto = estado === 'encerrado' ? saidas : Math.max(saidas + aindaVaiSair, metaGastos || 0);
+  const sobraPrevista = rendaReferencia - gastoPrevisto;
+  const disponivel = metaGastos !== null ? metaGastos - saidas - aindaVaiSair : null;
+  const ritmoEsperado = metaGastos !== null ? metaGastos * fracaoDoMes : null;
+
+  const nomes = new Set([...Object.keys(planoDespesas), ...Object.keys(realPorCategoria)]);
+  const categorias = [...nomes]
+    .map((categoria) => {
+      const planejado = planoDespesas[categoria] || 0;
+      const real = realPorCategoria[categoria] || 0;
+      let status = 'ok';
+      if (!planejado) status = temPlano ? 'fora_do_plano' : 'sem_meta';
+      else if (real > planejado) status = 'estourou';
+      else if (estado === 'em_andamento' && real > planejado * Math.max(fracaoDoMes, 0.1) * 1.15) status = 'atencao';
+      return { categoria, planejado: arred(planejado), real: arred(real), pct: planejado ? arred((real / planejado) * 100) : null, status };
+    })
+    .sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || b.real - a.real);
+
+  const avisos = [];
+  if (estado !== 'futuro' && metaGastos !== null) {
+    if (saidas > metaGastos) {
+      avisos.push({ tipo: 'alerta', texto: `Os gastos passaram a meta do mês em ${formatarMoeda(saidas - metaGastos)}.` });
+    } else if (estado === 'em_andamento' && ritmoEsperado > 0 && saidas > ritmoEsperado * 1.1) {
+      avisos.push({ tipo: 'atencao', texto: `Ritmo acima do previsto: já saiu ${formatarMoeda(saidas)}, o esperado até hoje era ${formatarMoeda(ritmoEsperado)}.` });
+    } else if (estado === 'em_andamento' && disponivel > 0 && diasRestantes > 0) {
+      avisos.push({ tipo: 'positivo', texto: `Dá para gastar cerca de ${formatarMoeda(disponivel / diasRestantes)} por dia até o fim do mês.` });
+    }
+  }
+  for (const c of categorias.filter((x) => x.status === 'estourou').slice(0, 3)) {
+    avisos.push({ tipo: 'alerta', texto: `${c.categoria}: ${formatarMoeda(c.real)} de ${formatarMoeda(c.planejado)} planejados.` });
+  }
+  if (aindaVaiSair > 0) {
+    avisos.push({ tipo: 'info', texto: `Ainda vão sair ${formatarMoeda(aindaVaiSair)} em ${contasPendentes.length} conta(s) fixa(s) não paga(s).` });
+  }
+  if (estado !== 'futuro' && rendaReferencia > 0) {
+    if (sobraPrevista >= metaGuardar) {
+      avisos.push({ tipo: 'positivo', texto: `No ritmo atual dá para guardar a meta de ${formatarPct(premissas.metaPoupancaPct, 0)} (${formatarMoeda(metaGuardar)}).` });
+    } else {
+      avisos.push({ tipo: 'atencao', texto: `Para guardar ${formatarPct(premissas.metaPoupancaPct, 0)} (${formatarMoeda(metaGuardar)}) faltam ${formatarMoeda(metaGuardar - Math.max(sobraPrevista, 0))} de folga.` });
+    }
+  }
+  if (entradas === 0 && estado === 'em_andamento' && (planoReceitas || historico.entradas)) {
+    avisos.push({ tipo: 'info', texto: 'Nenhuma entrada lançada neste mês ainda. A meta usa a renda planejada/média até o dinheiro entrar.' });
+  }
+
+  return {
+    mes,
+    estado,
+    diaHoje,
+    totalDias,
+    diasRestantes,
+    fracaoDoMes: arred(fracaoDoMes),
+    entradas: arred(entradas),
+    saidas: arred(saidas),
+    guardado: arred(guardado),
+    metaGastos: metaGastos !== null ? arred(metaGastos) : null,
+    fonteMetaGastos,
+    ritmoEsperado: ritmoEsperado !== null ? arred(ritmoEsperado) : null,
+    disponivel: disponivel !== null ? arred(disponivel) : null,
+    aindaVaiSair: arred(aindaVaiSair),
+    metaPoupancaPct: premissas.metaPoupancaPct,
+    rendaReferencia: arred(rendaReferencia),
+    metaGuardar: arred(metaGuardar),
+    gastoPrevisto: arred(gastoPrevisto),
+    sobraPrevista: arred(sobraPrevista),
+    categorias,
+    avisos,
+    mediaPorCategoria: historico.porCategoria,
+  };
 }

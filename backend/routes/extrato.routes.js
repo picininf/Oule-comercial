@@ -10,6 +10,7 @@ import { analisarExtratoBancario } from '../services/gemini.service.js';
 import { lerPlanilha, ehPlanilha } from '../services/planilha.service.js';
 import { carregarCartao, montarLinhas } from '../services/lancamentos.service.js';
 import { aplicarRegras } from '../services/regras.service.js';
+import { normalizarCategoria, revisarTransferencia } from '../utils/categorias.js';
 import { validar } from '../validators/validate.js';
 import { extratoConfigSchema, extratoImportarBodySchema } from '../validators/extrato.schema.js';
 
@@ -51,6 +52,11 @@ function importacaoParaApi(i) {
 /** Nome de arquivo seguro para guardar/exibir (sem caminho, sem controle). */
 function nomeSeguro(nome) {
   return String(nome || 'extrato').split(/[\\/]/).pop().replace(/[\u0000-\u001f<>]/g, '').slice(0, 200) || 'extrato';
+}
+
+async function nomeDoCliente(userId) {
+  const { data } = await supabaseAdmin.from('profiles').select('nome').eq('id', userId).maybeSingle();
+  return data?.nome || '';
 }
 
 async function registrarHistorico(dados) {
@@ -184,13 +190,23 @@ router.post(
       }
 
       const origem = extraidas.metodo === 'planilha' ? 'extrato_planilha' : 'extrato_manual';
+      const nomeCliente = await nomeDoCliente(alvoUserId);
       const linhas = extraidas.transacoes.flatMap((t) =>
         montarLinhas({
           userId: alvoUserId,
           data: t.data,
           descricao: t.descricao,
           valor: t.valor,
-          categoria: t.categoria,
+          // Pix recebido de terceiros que a IA/planilha marcou como
+          // Transferências sumia das entradas: só fica lá o que é da
+          // própria pessoa (ver revisarTransferencia).
+          categoria: revisarTransferencia(normalizarCategoria(t.categoria, t.descricao, t.valor), {
+            descricao: t.descricao,
+            valor: t.valor,
+            categoriaOriginal: t.categoriaOriginal ?? t.categoria,
+            nomeCliente,
+            ehCartao: Boolean(cartao),
+          }),
           categoriaOriginal: t.categoriaOriginal ?? t.categoria ?? null,
           origem,
           cartao,

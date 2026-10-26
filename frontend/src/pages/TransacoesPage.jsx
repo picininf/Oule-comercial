@@ -7,7 +7,7 @@ import { Card, Metrica, Alerta, useValores, useToast, useConfirmacao } from '../
 import { useApi } from '../hooks/useApi';
 import { api } from '../lib/api';
 import { CATEGORIAS, TIPOS_GASTO, TIPO_GASTO_POR_ID } from '../lib/categorias';
-import { getValorAjustado, origemDe, resumir, dataNoRegime, ORIGENS } from '../lib/finance';
+import { getValorAjustado, origemDe, resumir, dataNoRegime, movimentoDe, ORIGENS } from '../lib/finance';
 import { formatarMes, formatarMoeda, mesAtual, qs, somarMeses, ultimoDiaDoMes } from '../lib/format';
 
 const PERIODOS = [
@@ -45,6 +45,7 @@ export default function TransacoesPage({ userId = null }) {
   const [categoria, setCategoria] = useState('');
   const [tipoGasto, setTipoGasto] = useState('');
   const [origem, setOrigem] = useState('');
+  const [movimento, setMovimento] = useState('');
   const [novoAberto, setNovoAberto] = useState(false);
   const [editando, setEditando] = useState(null);
   const [regraDe, setRegraDe] = useState(null);
@@ -59,8 +60,9 @@ export default function TransacoesPage({ userId = null }) {
       .filter((t) => !categoria || t.categoria === categoria)
       .filter((t) => !tipoGasto || (tipoGasto === 'sem' ? !t.tipo_gasto : t.tipo_gasto === tipoGasto))
       .filter((t) => !origem || origemDe(t) === ORIGENS[origem])
+      .filter((t) => !movimento || movimentoDe(t) === movimento)
       .sort((a, b) => String(dataNoRegime(b, regime)).localeCompare(String(dataNoRegime(a, regime))));
-  }, [dados, busca, categoria, tipoGasto, origem, regime]);
+  }, [dados, busca, categoria, tipoGasto, origem, movimento, regime]);
 
   const totais = resumir(filtradas);
   // A escolha "data da compra x data do pagamento" só muda algo quando há
@@ -110,7 +112,13 @@ export default function TransacoesPage({ userId = null }) {
     <div className="pilha">
       {modalConfirmacao}
       <div className="metricas">
-        <Metrica rotulo="Entradas" icone="📥" valor={fmt(totais.entradas)} tom="positivo" />
+        <Metrica
+          rotulo="Entradas"
+          icone="📥"
+          valor={fmt(totais.entradas)}
+          tom="positivo"
+          detalhe={totais.transferenciasRecebidas > 0 ? `+ ${fmt(totais.transferenciasRecebidas)} em Transferências` : undefined}
+        />
         <Metrica rotulo="Saídas" icone="📤" valor={fmt(totais.saidas)} tom="negativo" />
         <Metrica rotulo="Saldo do período" icone="💰" valor={fmt(totais.saldo)} tom={totais.saldo >= 0 ? 'positivo' : 'negativo'} />
         <Metrica rotulo="Lançamentos" icone="🧾" valor={filtradas.length} detalhe="Transferências não entram nos totais" />
@@ -132,6 +140,12 @@ export default function TransacoesPage({ userId = null }) {
             <input className="input input-busca filtro-largo" placeholder="Buscar pela descrição..." value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar" />
             <select className="input" value={periodo} onChange={(e) => setPeriodo(e.target.value)} aria-label="Período">
               {PERIODOS.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+            <select className="input" value={movimento} onChange={(e) => setMovimento(e.target.value)} aria-label="Entradas ou saídas">
+              <option value="">Entradas e saídas</option>
+              <option value="entrada">📥 Só entradas</option>
+              <option value="saida">📤 Só saídas</option>
+              <option value="transferencia">⇄ Só transferências</option>
             </select>
             <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} aria-label="Categoria">
               <option value="">Todas as categorias</option>
