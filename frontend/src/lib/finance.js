@@ -1,3 +1,5 @@
+import { categoriaInfo } from './categorias';
+
 /**
  * Valor com o sinal correto (negativo = saída, positivo = entrada).
  * Espelha backend/utils/financeUtils.js — mantenha os dois em sincronia.
@@ -24,9 +26,9 @@ export function getValorAjustado(t) {
   return rawVal < 0 ? rawVal : -rawVal;
 }
 
-/** Transferência entre contas próprias / pagamento de fatura: nem gasto nem renda. */
+/** Categoria neutra (Transferências, Investimentos): nem gasto nem renda. */
 export function ehTransferencia(t) {
-  return t.categoria === 'Transferências';
+  return Boolean(t.categoria) && categoriaInfo(t.categoria).grupo === 'neutro';
 }
 
 /** Entrada / saída / transferência, para filtros. */

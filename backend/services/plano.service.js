@@ -194,8 +194,9 @@ export async function montarPainel(userId, { ano, regime = 'competencia' }) {
     const m = porChave.get(p.mes);
     if (!m) continue;
     const valor = Number(p.valor_planejado) || 0;
-    const receita = categoriaInfo(p.categoria).grupo === 'receita';
-    if (receita) m.plano.receitas += valor;
+    const grupo = categoriaInfo(p.categoria).grupo;
+    if (grupo === 'neutro') continue; // ex.: Investimentos planejado antes de virar neutro
+    if (grupo === 'receita') m.plano.receitas += valor;
     else m.plano.despesas += valor;
     const cat = (m.real.categorias[p.categoria] ||= { categoria: p.categoria, real: 0, planejado: 0, comprometido: 0 });
     cat.planejado += valor;
@@ -590,8 +591,9 @@ export async function metaDoMes(userId, mes) {
   const planoDespesas = {};
   for (const p of plano || []) {
     const valor = Number(p.valor_planejado) || 0;
-    if (categoriaInfo(p.categoria).grupo === 'receita') planoReceitas += valor;
-    else planoDespesas[p.categoria] = (planoDespesas[p.categoria] || 0) + valor;
+    const grupo = categoriaInfo(p.categoria).grupo;
+    if (grupo === 'receita') planoReceitas += valor;
+    else if (grupo === 'despesa') planoDespesas[p.categoria] = (planoDespesas[p.categoria] || 0) + valor;
   }
   const totalPlanoDespesas = Object.values(planoDespesas).reduce((a, b) => a + b, 0);
   const temPlano = totalPlanoDespesas > 0;

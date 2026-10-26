@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { categoriaInfo } from './categorias.js';
 
 /**
  * Origens cujo sinal do campo `valor` é confiável (negativo = saída,
@@ -32,9 +33,13 @@ export function getValorAjustado(t) {
   return rawVal < 0 ? rawVal : -rawVal;
 }
 
-/** Transferências entre contas da própria pessoa não são gasto nem renda. */
+/**
+ * Categorias neutras (Transferências entre contas da própria pessoa,
+ * pagamento de fatura, aplicação/resgate de Investimentos) não são gasto
+ * nem renda.
+ */
 export function ehTransferencia(t) {
-  return (t.categoria || '') === 'Transferências';
+  return Boolean(t.categoria) && categoriaInfo(t.categoria).grupo === 'neutro';
 }
 
 /**

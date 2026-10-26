@@ -95,7 +95,7 @@ export default function DashboardPage({ userId = null, onNavegar }) {
           tom="positivo"
           detalhe={
             doMes.transferenciasRecebidas > 0
-              ? `+ ${fmt(doMes.transferenciasRecebidas)} em Transferências (não conta como renda)`
+              ? `+ ${fmt(doMes.transferenciasRecebidas)} em Transferências/Investimentos (não conta como renda)`
               : `Mês anterior: ${fmt(doAnterior.entradas)}`
           }
         />
@@ -138,7 +138,7 @@ export default function DashboardPage({ userId = null, onNavegar }) {
               titulo="Nenhum gasto neste mês"
               texto={
                 transferenciasNoMes > 0
-                  ? `Há ${transferenciasNoMes} lançamento(s) em Transferências, que não contam como gasto. Se foi um pagamento a outra pessoa, mude a categoria em Transações.`
+                  ? `Há ${transferenciasNoMes} lançamento(s) em Transferências/Investimentos, que não contam como gasto. Se foi um pagamento a outra pessoa, mude a categoria em Transações.`
                   : 'Conecte o banco, importe um extrato ou lance seus gastos.'
               }
               acao={

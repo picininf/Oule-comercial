@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { criarSupabaseFalso } from './supabaseFalso.js';
 import { hojeBrasil, somarMeses, mesDe } from '../utils/financeUtils.js';
 import { normalizarCategoria, revisarTransferencia, categoriaDaEntrada } from '../utils/categorias.js';
+import { ehTransferencia } from '../utils/financeUtils.js';
 import { lerPlanilha } from '../services/planilha.service.js';
 import { extratoRespostaSchema } from '../validators/extrato.schema.js';
 import { comprovanteSchema } from '../validators/schemas.js';
@@ -18,6 +19,11 @@ test('Pix recebido de outra pessoa marcado como Transferências volta a ser entr
   assert.equal(revisar('Transferências', 'Transferência enviada pelo Pix - Pedro', -30), 'Outros');
   // Da própria pessoa / pagamento de fatura: continua Transferências.
   assert.equal(revisar('Transferências', 'Pix recebido - MARIA DA SILVA', 300, { nomeCliente: 'Maria da Silva' }), 'Transferências');
+  // Do MEI da própria pessoa (CNPJ) para a conta pessoal: é renda.
+  assert.equal(
+    revisar('Transferências', 'Transferência Recebida 29.828.104 MARIA DA SILVA - 29.828.104/0001-70 - NU PAGAMENTOS', 20, { nomeCliente: 'Maria da Silva' }),
+    'Renda Extra'
+  );
   assert.equal(revisar('Transferências', 'Pagamento de fatura', -900), 'Transferências');
   assert.equal(revisar('Transferências', 'Pix', 500, { categoriaOriginal: 'Same person transfer - PIX' }), 'Transferências');
   assert.equal(revisar('Transferências', 'Pagamento recebido', 500, { ehCartao: true }), 'Transferências');
@@ -32,6 +38,13 @@ test('entrada nunca fica numa categoria de despesa', () => {
   assert.equal(categoriaDaEntrada('Investimentos', 'Resgate CDB', 50), 'Investimentos');
   // saídas não mudam
   assert.equal(normalizarCategoria('Educação', 'Mensalidade escola', -900), 'Educação');
+});
+
+test('investimento (RDB, CDB) é neutro: não conta como gasto nem como entrada', () => {
+  assert.equal(normalizarCategoria(null, 'Aplicação RDB', -500), 'Investimentos');
+  assert.equal(ehTransferencia({ categoria: 'Investimentos', valor: -500 }), true);
+  assert.equal(ehTransferencia({ categoria: 'Transferências', valor: 10 }), true);
+  assert.equal(ehTransferencia({ categoria: 'Alimentação', valor: -10 }), false);
 });
 
 test('planilha com valor sem sinal + coluna D/C ou colunas Valor Débito/Crédito', () => {

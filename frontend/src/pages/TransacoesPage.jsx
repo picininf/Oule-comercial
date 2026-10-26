@@ -117,11 +117,11 @@ export default function TransacoesPage({ userId = null }) {
           icone="📥"
           valor={fmt(totais.entradas)}
           tom="positivo"
-          detalhe={totais.transferenciasRecebidas > 0 ? `+ ${fmt(totais.transferenciasRecebidas)} em Transferências` : undefined}
+          detalhe={totais.transferenciasRecebidas > 0 ? `+ ${fmt(totais.transferenciasRecebidas)} em neutros (Transferências/Investimentos)` : undefined}
         />
         <Metrica rotulo="Saídas" icone="📤" valor={fmt(totais.saidas)} tom="negativo" />
         <Metrica rotulo="Saldo do período" icone="💰" valor={fmt(totais.saldo)} tom={totais.saldo >= 0 ? 'positivo' : 'negativo'} />
-        <Metrica rotulo="Lançamentos" icone="🧾" valor={filtradas.length} detalhe="Transferências não entram nos totais" />
+        <Metrica rotulo="Lançamentos" icone="🧾" valor={filtradas.length} detalhe="Transferências e investimentos não entram nos totais" />
       </div>
 
       <Card
@@ -145,7 +145,7 @@ export default function TransacoesPage({ userId = null }) {
               <option value="">Entradas e saídas</option>
               <option value="entrada">📥 Só entradas</option>
               <option value="saida">📤 Só saídas</option>
-              <option value="transferencia">⇄ Só transferências</option>
+              <option value="transferencia">⇄ Só neutros (transferências e investimentos)</option>
             </select>
             <select className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} aria-label="Categoria">
               <option value="">Todas as categorias</option>

@@ -29,7 +29,9 @@ export const CATEGORIAS = [
   { id: 'Impostos e Taxas', icone: '🏛️', cor: '#78716c', grupo: 'despesa', tipoGasto: 'variavel_obrigatorio' },
   { id: 'Dívidas e Empréstimos', icone: '💳', cor: '#b91c1c', grupo: 'despesa', tipoGasto: 'recorrente_obrigatorio' },
   { id: 'Doações', icone: '🤝', cor: '#22c55e', grupo: 'despesa', tipoGasto: 'variavel_nao_obrigatorio' },
-  { id: 'Investimentos', icone: '📈', cor: '#059669', grupo: 'despesa', tipoGasto: 'recorrente_nao_obrigatorio' },
+  // Aplicar ou resgatar é o dinheiro da própria pessoa mudando de lugar:
+  // neutro, como Transferências (não conta como gasto nem como renda).
+  { id: 'Investimentos', icone: '📈', cor: '#059669', grupo: 'neutro', tipoGasto: null },
   { id: 'Outros', icone: '📦', cor: '#94a3b8', grupo: 'despesa', tipoGasto: 'variavel_nao_obrigatorio' },
   { id: 'Salário', icone: '💼', cor: '#10b981', grupo: 'receita', tipoGasto: null },
   { id: 'Renda Extra', icone: '💸', cor: '#22c55e', grupo: 'receita', tipoGasto: null },
@@ -42,6 +44,7 @@ const POR_ID = Object.fromEntries(CATEGORIAS.map((c) => [c.id, c]));
 
 export const CATEGORIAS_DESPESA = CATEGORIAS.filter((c) => c.grupo === 'despesa');
 export const CATEGORIAS_RECEITA = CATEGORIAS.filter((c) => c.grupo === 'receita');
+export const CATEGORIAS_NEUTRAS = CATEGORIAS.filter((c) => c.grupo === 'neutro');
 
 export function categoriaInfo(id) {
   return POR_ID[id] || { id: id || 'Outros', icone: '🏷️', cor: '#94a3b8', grupo: 'despesa', tipoGasto: null };

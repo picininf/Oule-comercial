@@ -39,7 +39,9 @@ export const CATEGORIAS = [
   { id: 'Impostos e Taxas', icone: '🏛️', cor: '#78716c', grupo: 'despesa', tipoGasto: 'variavel_obrigatorio' },
   { id: 'Dívidas e Empréstimos', icone: '💳', cor: '#b91c1c', grupo: 'despesa', tipoGasto: 'recorrente_obrigatorio' },
   { id: 'Doações', icone: '🤝', cor: '#22c55e', grupo: 'despesa', tipoGasto: 'variavel_nao_obrigatorio' },
-  { id: 'Investimentos', icone: '📈', cor: '#059669', grupo: 'despesa', tipoGasto: 'recorrente_nao_obrigatorio' },
+  // Aplicar ou resgatar é o dinheiro da própria pessoa mudando de lugar:
+  // neutro, como Transferências (não conta como gasto nem como renda).
+  { id: 'Investimentos', icone: '📈', cor: '#059669', grupo: 'neutro', tipoGasto: null },
   { id: 'Outros', icone: '📦', cor: '#94a3b8', grupo: 'despesa', tipoGasto: 'variavel_nao_obrigatorio' },
 
   { id: 'Salário', icone: '💼', cor: '#10b981', grupo: 'receita', tipoGasto: null },
@@ -199,8 +201,12 @@ export function revisarTransferencia(categoria, { descricao = '', valor = null, 
   if (ehCartao) return categoria;
   const texto = semAcento(`${categoriaOriginal || ''} ${descricao || ''}`);
   if (TRANSFERENCIA_PROPRIA.test(texto)) return categoria;
+  // Nome do cliente na descrição = Pix de mim para mim. Exceção: veio de
+  // um CNPJ (o MEI/empresa da pessoa pagando a pessoa física) — para as
+  // finanças pessoais isso é renda (pró-labore, lucro), não transferência.
   const nome = semAcento(nomeCliente).replace(/\s+/g, ' ');
-  if (nome.split(' ').length >= 2 && semAcento(descricao).replace(/\s+/g, ' ').includes(nome)) return categoria;
+  const deCnpj = /\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/.test(descricao || '');
+  if (!deCnpj && nome.split(' ').length >= 2 && semAcento(descricao).replace(/\s+/g, ' ').includes(nome)) return categoria;
 
   const pelaDescricao = porRegras(descricao, { ignorarGenerica: true });
   if (pelaDescricao && pelaDescricao !== 'Transferências') return categoriaDaEntrada(pelaDescricao, descricao, valor);

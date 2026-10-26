@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { CATEGORIAS, TIPOS_GASTO, categoriaInfo } from '../lib/categorias';
+import { CATEGORIAS, CATEGORIAS_NEUTRAS, TIPOS_GASTO, categoriaInfo } from '../lib/categorias';
 import { formatarData, formatarMoeda } from '../lib/format';
 import { SENTIDOS, sugerirPadrao, descricaoDoBanco } from '../lib/regras';
 import { Modal, Campo, Alerta, useToast } from './ui';
@@ -38,8 +38,18 @@ export default function RegraModal({ regra = null, transacao = null, userId = nu
   const [erro, setErro] = useState('');
 
   const set = (campo) => (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
+  // "Neutro" = não conta como gasto nem como entrada (categorias neutras:
+  // Transferências e Investimentos).
+  const neutro = Boolean(form.categoria) && categoriaInfo(form.categoria).grupo === 'neutro';
   const categoriaEhDespesa = !form.categoria || categoriaInfo(form.categoria).grupo === 'despesa';
   const mostraTipoGasto = form.sentido !== 'entrada' && categoriaEhDespesa;
+  const trocarNeutro = (sim) => setForm((f) => ({
+    ...f,
+    categoria: sim ? (categoriaInfo(f.categoria).grupo === 'neutro' ? f.categoria : 'Investimentos') : '',
+    // Aplicação (saída) e resgate (entrada) costumam ter o mesmo texto.
+    sentido: sim ? 'ambos' : f.sentido,
+    tipoGasto: '',
+  }));
 
   // Prévia: quantos lançamentos já gravados a regra pegaria.
   useEffect(() => {
@@ -137,14 +147,21 @@ export default function RegraModal({ regra = null, transacao = null, userId = nu
           ))}
         </div>
 
+        <Campo rotulo="Como conta" ajuda={neutro ? 'Não entra nos gastos nem nas entradas (ex.: aplicação/resgate de investimento, dinheiro entre contas suas).' : 'Saída conta como gasto e entrada como renda.'}>
+          <div className="segmentado" role="group" aria-label="Como conta">
+            <button type="button" className={!neutro ? 'ativo' : ''} onClick={() => trocarNeutro(false)}>Gasto / Entrada</button>
+            <button type="button" className={neutro ? 'ativo' : ''} onClick={() => trocarNeutro(true)}>⇄ Neutro</button>
+          </div>
+        </Campo>
+
         <div className="grade-form">
           <Campo rotulo="Novo nome (opcional)" className="inteira" ajuda="Como o lançamento vai aparecer no app. Ex.: Brownie">
             <input maxLength={200} value={form.descricao} onChange={set('descricao')} placeholder="Manter a descrição do banco" />
           </Campo>
           <Campo rotulo="Categoria">
             <select value={form.categoria} onChange={(e) => setForm((f) => ({ ...f, categoria: e.target.value, tipoGasto: '' }))}>
-              <option value="">Manter a categoria automática</option>
-              {CATEGORIAS.map((c) => <option key={c.id} value={c.id}>{c.icone} {c.id}</option>)}
+              {!neutro && <option value="">Manter a categoria automática</option>}
+              {(neutro ? CATEGORIAS_NEUTRAS : CATEGORIAS.filter((c) => c.grupo !== 'neutro')).map((c) => <option key={c.id} value={c.id}>{c.icone} {c.id}</option>)}
             </select>
           </Campo>
           {mostraTipoGasto && (
@@ -165,7 +182,7 @@ export default function RegraModal({ regra = null, transacao = null, userId = nu
             📌 Todo {form.sentido === 'entrada' ? 'recebimento' : form.sentido === 'saida' ? 'pagamento' : 'lançamento'} com “<strong>{form.padrao.trim()}</strong>”
             {nomeFinal && <> vai se chamar “<strong>{nomeFinal}</strong>”</>}
             {nomeFinal && cat && ' e'}
-            {cat && <> vai para <strong>{cat.icone} {form.categoria}</strong></>}.
+            {cat && <> vai para <strong>{cat.icone} {form.categoria}</strong>{neutro && ' (neutro: não conta como gasto nem entrada)'}</>}.
           </p>
         )}
 

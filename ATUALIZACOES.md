@@ -176,3 +176,10 @@ Endpoint: `GET /api/plano/meta-mes?mes=AAAA-MM`. Testes: `npm test` (29, incluin
 ### Planejamento: copiar para todos os meses seguintes
 
 Em **Planejamento → 📋 Copiar para outros meses** há a opção (agora padrão) **"Todos os meses seguintes, inclusive os próximos anos"**: copia o plano do mês para todos os meses até dezembro do último ano planejável (ano atual + 10). Nesse modo o reajuste é **por ano**: os meses do mesmo ano ficam iguais, o ano seguinte recebe +X%, o outro +X% sobre esse etc. Sem marcar "Substituir", meses que já têm plano são mantidos. A cópia agora é feita em lote (rápida mesmo com 100+ meses).
+
+### Investimentos agora são neutros + opção "Neutro" nas regras
+
+- **Investimentos** (aplicação/resgate de RDB, CDB, Tesouro, corretora...) passou a ser uma categoria **neutra**, como Transferências: não conta como gasto nem como entrada. É o dinheiro da própria pessoa mudando de lugar. Rendimentos (juros, dividendos) continuam contando como entrada.
+- **Regras automáticas:** novo campo **"Como conta": Gasto / Entrada ou ⇄ Neutro**. Em Neutro, a categoria fica entre Investimentos e Transferências, e a regra passa a valer para saídas e entradas (aplicação e resgate costumam ter o mesmo texto).
+- **Editar lançamento:** além de 📤 Gasto e 📥 Entrada, há o botão **⇄ Neutro**.
+- Valores de Investimentos que já estavam no plano mensal deixam de entrar no total de despesas planejadas.

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { getValorAjustado, origemDe } from '../lib/finance';
+import { getValorAjustado, origemDe, ehTransferencia } from '../lib/finance';
 import { categoriaInfo, TIPO_GASTO_POR_ID } from '../lib/categorias';
 import { formatarData } from '../lib/format';
 import { useValores, Vazio, Carregando } from './ui';
@@ -61,7 +61,7 @@ export default function TransactionTable({ transacoes, loading, onEditar, onExcl
                   <td>{tipo ? <span className="tag" style={{ color: tipo.cor }}>{tipo.curto}</span> : <span className="texto-suave">—</span>}</td>
                   <td><span className={`tag ${origem.classe}`}>{origem.nome}</span></td>
                   <td className={`num ${val > 0 ? 'positivo' : val < 0 ? 'negativo' : ''}`} style={{ fontWeight: 700 }}>
-                    {t.categoria === 'Transferências' ? '⇄ ' : val > 0 ? '+ ' : '− '}{fmt(Math.abs(val))}
+                    {ehTransferencia(t) ? '⇄ ' : val > 0 ? '+ ' : '− '}{fmt(Math.abs(val))}
                   </td>
                   {editavel && (
                     <td className="acoes">

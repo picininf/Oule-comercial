@@ -190,6 +190,7 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
     tipoGasto: transacao.tipo_gasto || '',
     observacao: transacao.observacao || '',
     sentido: Number(transacao.valor) > 0 ? 'entrada' : 'saida',
+    neutro: categoriaInfo(transacao.categoria).grupo === 'neutro',
     aplicarSemelhantes: false,
   });
   const [salvando, setSalvando] = useState(false);
@@ -197,12 +198,19 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
   const set = (campo) => (e) => setForm((f) => ({ ...f, [campo]: e.target.value }));
   const sentidoOriginal = Number(transacao.valor) > 0 ? 'entrada' : 'saida';
   const ehDespesa = form.sentido === 'saida' && categoriaInfo(form.categoria).grupo === 'despesa';
+  const ficarNeutro = () => setForm((f) => ({
+    ...f,
+    neutro: true,
+    categoria: categoriaInfo(f.categoria).grupo === 'neutro' ? f.categoria : 'Investimentos',
+    tipoGasto: '',
+  }));
   const trocarSentido = (sentido) => setForm((f) => ({
     ...f,
+    neutro: false,
     sentido,
     // Ao virar entrada, sugere uma categoria de receita (e vice-versa).
-    categoria: sentido === 'entrada' && categoriaInfo(f.categoria).grupo === 'despesa' ? 'Renda Extra'
-      : sentido === 'saida' && categoriaInfo(f.categoria).grupo === 'receita' ? 'Outros' : f.categoria,
+    categoria: sentido === 'entrada' && categoriaInfo(f.categoria).grupo !== 'receita' ? 'Renda Extra'
+      : sentido === 'saida' && categoriaInfo(f.categoria).grupo !== 'despesa' ? 'Outros' : f.categoria,
     tipoGasto: '',
   }));
 
@@ -245,8 +253,9 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
         <Alerta>{erro}</Alerta>
         {!transacao.open_finance_id && (
           <div className="segmentado" role="group" aria-label="Entrada ou gasto">
-            <button type="button" className={form.sentido === 'saida' ? 'ativo' : ''} onClick={() => trocarSentido('saida')}>📤 Gasto</button>
-            <button type="button" className={form.sentido === 'entrada' ? 'ativo' : ''} onClick={() => trocarSentido('entrada')}>📥 Entrada</button>
+            <button type="button" className={!form.neutro && form.sentido === 'saida' ? 'ativo' : ''} onClick={() => trocarSentido('saida')}>📤 Gasto</button>
+            <button type="button" className={!form.neutro && form.sentido === 'entrada' ? 'ativo' : ''} onClick={() => trocarSentido('entrada')}>📥 Entrada</button>
+            <button type="button" className={form.neutro ? 'ativo' : ''} onClick={ficarNeutro} title="Não conta como gasto nem como entrada">⇄ Neutro</button>
           </div>
         )}
         <Campo rotulo="Descrição">
@@ -254,8 +263,8 @@ export function EditarTransacaoModal({ transacao, onFechar, onSalvo }) {
         </Campo>
         <div className="grade-form">
           <Campo rotulo="Categoria">
-            <select value={form.categoria} onChange={(e) => setForm((f) => ({ ...f, categoria: e.target.value, tipoGasto: '' }))}>
-              {CATEGORIAS.map((c) => <option key={c.id} value={c.id}>{c.icone} {c.id}</option>)}
+            <select value={form.categoria} onChange={(e) => setForm((f) => ({ ...f, categoria: e.target.value, tipoGasto: '', neutro: categoriaInfo(e.target.value).grupo === 'neutro' }))}>
+              {CATEGORIAS.map((c) => <option key={c.id} value={c.id}>{c.icone} {c.id}{c.grupo === 'neutro' ? ' (neutro)' : ''}</option>)}
             </select>
           </Campo>
           {ehDespesa && (

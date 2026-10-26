@@ -552,6 +552,7 @@ async function ultimoMesComMovimento(userId, antesDe) {
     .eq('user_id', userId)
     .lt('data_competencia', `${antesDe}-01`)
     .neq('categoria', 'Transferências')
+    .neq('categoria', 'Investimentos')
     .order('data_competencia', { ascending: false })
     .limit(1);
   if (error) throw error;
