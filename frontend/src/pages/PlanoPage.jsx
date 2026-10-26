@@ -15,6 +15,9 @@ const FONTE_ROTULO = { plano: 'pelo plano', historico: 'pela média recente', co
  * incluindo receitas, e o sistema compara com o realizado, considera o
  * que já está comprometido (parcelas e contas fixas) e tira conclusões.
  */
+// Último ano que o Planejamento deixa planejar (atual + 10).
+const ANO_LIMITE = Number(mesAtual().slice(0, 4)) + 10;
+
 export default function PlanoPage({ userId = null }) {
   const { fmt } = useValores();
   const anoAtual = Number(mesAtual().slice(0, 4));
@@ -404,7 +407,7 @@ export function EditorOrcamento({ mes, userId, onFechar, onSalvo }) {
 function CopiarPlano({ mes, userId, onFechar, onSalvo }) {
   const toast = useToast();
   const ano = Number(mes.mes.slice(0, 4));
-  const [modo, setModo] = useState('resto_do_ano');
+  const [modo, setModo] = useState('todos_seguintes');
   const [reajuste, setReajuste] = useState('0');
   const [sobrescrever, setSobrescrever] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -417,8 +420,16 @@ function CopiarPlano({ mes, userId, onFechar, onSalvo }) {
       return lista;
     }
     if (modo === 'proximo_ano') return Array.from({ length: 12 }, (_, i) => `${ano + 1}-${String(i + 1).padStart(2, '0')}`);
+    if (modo === 'todos_seguintes') {
+      // Até dezembro do último ano que o Planejamento mostra.
+      const ultimo = `${ANO_LIMITE}-12`;
+      const lista = [];
+      for (let m = somarMeses(mes.mes, 1); m <= ultimo; m = somarMeses(m, 1)) lista.push(m);
+      return lista;
+    }
     return [somarMeses(mes.mes, 1)];
   }, [modo, mes.mes, ano]);
+  const reajusteAnual = modo === 'todos_seguintes';
 
   const copiar = async () => {
     setSalvando(true);
@@ -428,6 +439,7 @@ function CopiarPlano({ mes, userId, onFechar, onSalvo }) {
         origem: mes.mes,
         destinos,
         reajustePct: Number(reajuste) || 0,
+        reajusteAnual,
         sobrescrever,
         ...(userId ? { userId } : {}),
       });
@@ -455,19 +467,31 @@ function CopiarPlano({ mes, userId, onFechar, onSalvo }) {
       <Alerta>{erro}</Alerta>
       <Campo rotulo="Para onde">
         <select className="input" value={modo} onChange={(e) => setModo(e.target.value)}>
+          <option value="todos_seguintes">Todos os meses seguintes, inclusive os próximos anos (até dez/{ANO_LIMITE})</option>
           <option value="resto_do_ano">Meses restantes de {ano}</option>
           <option value="proximo_mes">Só o mês seguinte</option>
           <option value="proximo_ano">Todos os meses de {ano + 1}</option>
         </select>
       </Campo>
-      <Campo rotulo="Reajuste aplicado (%)" ajuda="Ex.: 4,5 para corrigir pela inflação prevista. Use negativo para reduzir.">
+      <Campo
+        rotulo={reajusteAnual ? 'Reajuste por ano (%)' : 'Reajuste aplicado (%)'}
+        ajuda={reajusteAnual
+          ? `Os meses de ${ano} ficam iguais; ${ano + 1} recebe +X%, ${ano + 2} +X% sobre ${ano + 1}, e assim por diante. Ex.: 4,5 para a inflação prevista.`
+          : 'Ex.: 4,5 para corrigir pela inflação prevista. Use negativo para reduzir.'}
+      >
         <input className="input" type="number" step="0.1" value={reajuste} onChange={(e) => setReajuste(e.target.value)} />
       </Campo>
       <label className="check">
         <input type="checkbox" checked={sobrescrever} onChange={(e) => setSobrescrever(e.target.checked)} />
         <span>Substituir meses que já têm plano (sem marcar, eles são mantidos)</span>
       </label>
-      {destinos.length > 0 && <p className="texto-suave texto-pequeno">Destinos: {destinos.map((d) => formatarMes(d, { curto: true })).join(', ')}</p>}
+      {destinos.length > 0 && (
+        <p className="texto-suave texto-pequeno">
+          Destinos: {destinos.length > 14
+            ? `${formatarMes(destinos[0], { curto: true })} até ${formatarMes(destinos[destinos.length - 1], { curto: true })} (${destinos.length} meses)`
+            : destinos.map((d) => formatarMes(d, { curto: true })).join(', ')}
+        </p>
+      )}
     </Modal>
   );
 }

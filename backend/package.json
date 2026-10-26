@@ -16,7 +16,7 @@
     "normalizar:categorias": "node scripts/normalizar-categorias.js",
     "corrigir:entradas": "node scripts/corrigir-entradas.js",
     "sync:item": "node scripts/sincronizar-item.js",
-    "test": "node --import ./tests/setup.js --experimental-test-module-mocks --test tests/regras.test.js tests/plano.test.js tests/regrasCliente.test.js tests/entradas.test.js"
+    "test": "node --import ./tests/setup.js --experimental-test-module-mocks --test tests/regras.test.js tests/plano.test.js tests/regrasCliente.test.js tests/entradas.test.js tests/copiarPlano.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

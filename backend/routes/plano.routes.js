@@ -117,20 +117,25 @@ router.put('/orcamento', validar(orcamentoSchema), async (req, res, next) => {
 const copiarSchema = z.object({
   userId: z.string().uuid().optional(),
   origem: mesSchema,
-  destinos: z.array(mesSchema).min(1).max(36),
+  // Até 10 anos de planejamento à frente (~130 meses).
+  destinos: z.array(mesSchema).min(1).max(150),
   // Reajuste aplicado a cada mês de destino (ex.: 4.5 = +4,5%).
   reajustePct: z.coerce.number().min(-50).max(100).default(0),
+  // true: o reajuste vale por ANO de distância (composto) — meses do mesmo
+  // ano da origem ficam iguais, o ano seguinte +X%, o outro +X% sobre isso...
+  reajusteAnual: z.boolean().default(false),
   sobrescrever: z.boolean().default(true),
 });
 
 /**
  * POST /api/plano/orcamento/copiar
  * Replica o orçamento de um mês para vários (ex.: "copiar janeiro para o
- * resto do ano" ou "repetir este ano em 2027 com +5%").
+ * resto do ano", "repetir este ano em 2027 com +5%" ou "para todos os
+ * meses seguintes, até os próximos anos").
  */
 router.post('/orcamento/copiar', validar(copiarSchema), async (req, res, next) => {
   try {
-    const { origem, destinos, reajustePct, sobrescrever } = req.body;
+    const { origem, destinos, reajustePct, reajusteAnual, sobrescrever } = req.body;
     const alvo = await resolverUsuarioAlvo(req, req.body.userId);
 
     const { data: base, error } = await supabaseAdmin
@@ -141,23 +146,42 @@ router.post('/orcamento/copiar', validar(copiarSchema), async (req, res, next) =
     if (error) throw error;
     if (!base || base.length === 0) throw httpError(400, 'O mês de origem não tem orçamento para copiar.');
 
-    const fator = 1 + reajustePct / 100;
-    const itens = base.map((b) => ({ categoria: b.categoria, valorPlanejado: Math.round(Number(b.valor_planejado) * fator * 100) / 100 }));
-
-    let copiados = 0;
-    for (const destino of [...new Set(destinos)].filter((d) => d !== origem)) {
-      if (!sobrescrever) {
-        const { count } = await supabaseAdmin
-          .from('plano_mensal')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', alvo)
-          .eq('mes', destino);
-        if (count > 0) continue;
-      }
-      await gravarOrcamento(alvo, destino, itens);
-      copiados += 1;
+    let alvos = [...new Set(destinos)].filter((d) => d !== origem);
+    if (!sobrescrever) {
+      // Uma consulta só para saber quais meses já têm plano.
+      const { data: existentes, error: e2 } = await supabaseAdmin
+        .from('plano_mensal')
+        .select('mes')
+        .eq('user_id', alvo)
+        .in('mes', alvos);
+      if (e2) throw e2;
+      const comPlano = new Set((existentes || []).map((r) => r.mes));
+      alvos = alvos.filter((d) => !comPlano.has(d));
     }
-    res.json({ ok: true, copiados });
+    if (alvos.length === 0) return res.json({ ok: true, copiados: 0 });
+
+    const anoOrigem = Number(origem.slice(0, 4));
+    const linhas = alvos.flatMap((destino) => {
+      const anos = reajusteAnual ? Number(destino.slice(0, 4)) - anoOrigem : 1;
+      const fator = (1 + reajustePct / 100) ** anos;
+      return base
+        .filter((b) => Number(b.valor_planejado) > 0)
+        .map((b) => ({
+          user_id: alvo,
+          mes: destino,
+          categoria: b.categoria,
+          valor_planejado: Math.round(Number(b.valor_planejado) * fator * 100) / 100,
+        }));
+    });
+
+    // Em lote: apaga o plano dos meses de destino e grava o novo.
+    const { error: erroDelete } = await supabaseAdmin.from('plano_mensal').delete().eq('user_id', alvo).in('mes', alvos);
+    if (erroDelete) throw erroDelete;
+    for (let i = 0; i < linhas.length; i += 500) {
+      const { error: erroInsert } = await supabaseAdmin.from('plano_mensal').insert(linhas.slice(i, i + 500));
+      if (erroInsert) throw erroInsert;
+    }
+    res.json({ ok: true, copiados: alvos.length });
   } catch (err) {
     next(err);
   }
